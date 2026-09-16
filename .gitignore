@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment Variables - NEVER UPLOAD SECRETS
+.env
+.env.*
+.env.local
+!.env.example
+
+# User uploads (selfies, temporary documents)
+uploads/*
+!uploads/.gitkeep
+uploads/attendance_selfies/*
+!uploads/attendance_selfies/.gitkeep
+
+# Logs & Runtime data
+logs/
+*.log
+
+# OS & Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
