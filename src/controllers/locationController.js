@@ -1,6 +1,5 @@
 const Location = require('../models/Location');
 const jwt = require('jsonwebtoken');
-const { v4: uuidv4 } = require('uuid'); // Might need this for jti, but we can just use crypto or simple math
 
 exports.createLocation = async (req, res, next) => {
   try {
