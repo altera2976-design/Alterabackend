@@ -23,11 +23,10 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 // ── CORS ─────────────────────────────────────────────────────────────────────
 app.use(
   cors({
-    // ⚠️  SECURITY: In production, set CORS_ORIGIN to your exact domain.
-    // Never leave this as '*' in production — it allows any origin to call the API.
-    origin: process.env.CORS_ORIGIN || (process.env.NODE_ENV === 'production' ? false : '*'),
+    origin: true,
+    credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   })
 );
 
