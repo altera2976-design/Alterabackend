@@ -7,6 +7,38 @@ const { generalLimiter } = require('./src/middleware/rateLimiter');
 
 const app = express();
 
+// ── Allowed CORS origins ──────────────────────────────────────────────────────
+const ALLOWED_ORIGINS = [
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'http://localhost:5001',
+  'https://alteraadmin.vercel.app',
+  'https://alteraadmin-git-main-altera2976-design.vercel.app',
+];
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, curl, Postman)
+    if (!origin) return callback(null, true);
+    if (ALLOWED_ORIGINS.includes(origin)) {
+      callback(null, true);
+    } else {
+      console.warn(`⚠️ CORS blocked origin: ${origin}`);
+      callback(null, true); // Still allow — change to `callback(new Error('Not allowed by CORS'))` to block
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  optionsSuccessStatus: 200,
+};
+
+// ── CORS must come BEFORE helmet and all routes ───────────────────────────────
+app.use(cors(corsOptions));
+
+// ── Handle OPTIONS preflight for ALL routes explicitly ────────────────────────
+app.options('*', cors(corsOptions));
+
 app.use((req, res, next) => {
   console.log(`📡 [${new Date().toLocaleTimeString()}] ${req.method} ${req.originalUrl}`);
   next();
@@ -19,16 +51,6 @@ app.use(helmet({
 
 // ── Static uploaded files (selfies, documents) ──────────────────────────────
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-
-// ── CORS ─────────────────────────────────────────────────────────────────────
-app.use(
-  cors({
-    origin: true,
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-  })
-);
 
 // ── Body parsers ─────────────────────────────────────────────────────────────
 app.use(express.json({ limit: '10mb' }));
