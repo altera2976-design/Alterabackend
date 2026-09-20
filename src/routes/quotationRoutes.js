@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { protect, authorize } = require('../middleware/auth');
+const { protect, checkPermission } = require('../middleware/auth');
 const quotationController = require('../controllers/quotationController');
 
 // ── PUBLIC CLIENT ACCESS (NO JWT REQUIRED) ──────────────────────────────────
@@ -13,21 +13,21 @@ router.post('/public/:token/reject', quotationController.clientRejectQuotation);
 router.use(protect);
 
 // Global settings & templates
-router.get('/config', quotationController.getConfig);
-router.put('/config', authorize('ADMIN'), quotationController.updateConfig);
+router.get('/config', checkPermission('quotation', 'view'), quotationController.getConfig);
+router.put('/config', checkPermission('quotation', 'edit'), quotationController.updateConfig);
 
 // Quotation summary KPIs
-router.get('/summary', quotationController.getQuotationSummary);
+router.get('/summary', checkPermission('quotation', 'view'), quotationController.getQuotationSummary);
 
 // Quotation CRUD
-router.get('/', quotationController.getQuotations);
-router.post('/', quotationController.createQuotation);
-router.get('/:id', quotationController.getQuotationById);
-router.put('/:id', quotationController.updateQuotation);
-router.delete('/:id', quotationController.deleteQuotation);
+router.get('/', checkPermission('quotation', 'view'), quotationController.getQuotations);
+router.post('/', checkPermission('quotation', 'create'), quotationController.createQuotation);
+router.get('/:id', checkPermission('quotation', 'view'), quotationController.getQuotationById);
+router.put('/:id', checkPermission('quotation', 'edit'), quotationController.updateQuotation);
+router.delete('/:id', checkPermission('quotation', 'delete'), quotationController.deleteQuotation);
 
 // Quotation specific actions
-router.post('/:id/send', quotationController.sendQuotation);
-router.post('/:id/convert-to-project', quotationController.convertToProject);
+router.post('/:id/send', checkPermission('quotation', 'edit'), quotationController.sendQuotation);
+router.post('/:id/convert-to-project', checkPermission('quotation', 'edit'), quotationController.convertToProject);
 
 module.exports = router;

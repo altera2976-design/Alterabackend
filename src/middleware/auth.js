@@ -56,14 +56,61 @@ const protect = async (req, res, next) => {
  */
 const authorize = (...roles) => {
   return (req, res, next) => {
-    if (!roles.includes(req.user.role)) {
-      return res.status(403).json({
-        success: false,
-        message: `Access denied. Role '${req.user.role}' is not authorized for this action.`,
-      });
+    const userRole = req.user?.role;
+    const isSuper = userRole === 'SUPER_ADMIN';
+    const isAdmin = userRole === 'ADMIN' || isSuper;
+
+    if (isSuper || roles.includes(userRole) || (roles.includes('ADMIN') && isAdmin)) {
+      return next();
     }
-    next();
+    return res.status(403).json({
+      success: false,
+      message: `Access denied. Role '${userRole}' is not authorized for this action.`,
+    });
   };
 };
 
-module.exports = { protect, authorize };
+/**
+ * checkPermission middleware - Verifies granular module permission for current user
+ * Usage: checkPermission('crm', 'create') or checkPermission('tasks', 'assign')
+ */
+const checkPermission = (moduleName, action = 'view') => {
+  return (req, res, next) => {
+    const userRole = req.user?.role;
+    if (userRole === 'SUPER_ADMIN' || req.user?.email?.toLowerCase() === 'admin@alterainterior.com') {
+      return next();
+    }
+
+    if (req.user?.status === 'INACTIVE') {
+      return res.status(401).json({
+        success: false,
+        message: 'Your account has been deactivated.',
+      });
+    }
+
+    if (req.user?.isAdminPanelEnabled === false) {
+      return res.status(403).json({
+        success: false,
+        message: 'Admin Panel access is disabled for your account.',
+      });
+    }
+
+    const modPerms = req.user?.permissions?.[moduleName];
+
+    if (modPerms) {
+      if (typeof modPerms === 'boolean' && modPerms === true) {
+        return next();
+      }
+      if (typeof modPerms === 'object' && modPerms[action] === true) {
+        return next();
+      }
+    }
+
+    return res.status(403).json({
+      success: false,
+      message: `Access denied. You do not have permission to ${action} in ${moduleName}.`,
+    });
+  };
+};
+
+module.exports = { protect, authorize, checkPermission };

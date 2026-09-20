@@ -1,19 +1,19 @@
 const express = require('express');
 const router = express.Router();
-const { protect, authorize } = require('../middleware/auth');
+const { protect, checkPermission } = require('../middleware/auth');
 const taskController = require('../controllers/taskController');
 
 router.use(protect);
 
 router.route('/')
-  .get(taskController.getTasks)
-  .post(taskController.createTask); // Checks PM or Admin inside controller
+  .get(checkPermission('tasks', 'view'), taskController.getTasks)
+  .post(checkPermission('tasks', 'create'), taskController.createTask);
 
 router.route('/:id')
-  .get(taskController.getTask)
-  .delete(authorize('ADMIN'), taskController.deleteTask);
+  .get(checkPermission('tasks', 'view'), taskController.getTask)
+  .delete(checkPermission('tasks', 'delete'), taskController.deleteTask);
 
-router.patch('/:id/progress', taskController.updateTaskProgress);
-router.post('/:id/comments', taskController.addTaskComment);
+router.patch('/:id/progress', checkPermission('tasks', 'edit'), taskController.updateTaskProgress);
+router.post('/:id/comments', checkPermission('tasks', 'edit'), taskController.addTaskComment);
 
 module.exports = router;

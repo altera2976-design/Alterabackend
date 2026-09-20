@@ -1,36 +1,36 @@
-const mongoose = require('mongoose');
-const bcrypt = require('bcryptjs');
+const mongoose = require("mongoose");
+const bcrypt = require("bcryptjs");
 
 const UserSchema = new mongoose.Schema(
   {
     name: {
       type: String,
-      required: [true, 'Name is required'],
+      required: [true, "Name is required"],
       trim: true,
     },
     email: {
       type: String,
-      required: [true, 'Email is required'],
+      required: [true, "Email is required"],
       unique: true,
       lowercase: true,
       trim: true,
-      match: [/^\S+@\S+\.\S+$/, 'Please provide a valid email'],
+      match: [/^\S+@\S+\.\S+$/, "Please provide a valid email"],
     },
     phone: {
       type: String,
       trim: true,
-      default: '',
+      default: "",
     },
     password: {
       type: String,
-      required: [true, 'Password is required'],
-      minlength: [6, 'Password must be at least 6 characters'],
+      required: [true, "Password is required"],
+      minlength: [6, "Password must be at least 6 characters"],
       select: false,
     },
     role: {
       type: String,
-      enum: ['ADMIN', 'EMPLOYEE'],
-      default: 'EMPLOYEE',
+      enum: ["SUPER_ADMIN", "ADMIN", "SALES", "MANAGER", "DESIGNER", "PROJECT_MANAGER", "EMPLOYEE"],
+      default: "EMPLOYEE",
     },
     employeeId: {
       type: String,
@@ -44,22 +44,22 @@ const UserSchema = new mongoose.Schema(
     },
     authProvider: {
       type: String,
-      enum: ['LOCAL', 'GOOGLE'],
-      default: 'LOCAL',
+      enum: ["LOCAL", "GOOGLE"],
+      default: "LOCAL",
     },
     avatar: {
       type: String,
-      default: '',
+      default: "",
     },
     department: {
       type: String,
       trim: true,
-      default: '',
+      default: "",
     },
     designation: {
       type: String,
       trim: true,
-      default: '',
+      default: "",
     },
     joiningDate: {
       type: Date,
@@ -68,12 +68,12 @@ const UserSchema = new mongoose.Schema(
     salary: {
       type: Number,
       default: 0,
-      min: [0, 'Salary cannot be negative'],
+      min: [0, "Salary cannot be negative"],
     },
     salaryType: {
       type: String,
-      enum: ['MONTHLY', 'DAILY', 'HOURLY'],
-      default: 'MONTHLY',
+      enum: ["MONTHLY", "DAILY", "HOURLY"],
+      default: "MONTHLY",
     },
     salaryStructure: {
       basic: { type: Number, default: 0 },
@@ -92,22 +92,89 @@ const UserSchema = new mongoose.Schema(
     workingHours: {
       type: Number,
       default: 8,
-      min: [0, 'Working hours cannot be negative'],
+      min: [0, "Working hours cannot be negative"],
     },
     status: {
       type: String,
-      enum: ['ACTIVE', 'INACTIVE'],
-      default: 'ACTIVE',
+      enum: ["ACTIVE", "INACTIVE"],
+      default: "ACTIVE",
+    },
+    isAdminPanelEnabled: {
+      type: Boolean,
+      default: false,
+    },
+    permissions: {
+      dashboard: {
+        view: { type: Boolean, default: true },
+      },
+      tasks: {
+        view: { type: Boolean, default: true },
+        create: { type: Boolean, default: true },
+        edit: { type: Boolean, default: true },
+        delete: { type: Boolean, default: true },
+        assign: { type: Boolean, default: true },
+      },
+      crm: {
+        view: { type: Boolean, default: true },
+        create: { type: Boolean, default: true },
+        edit: { type: Boolean, default: true },
+        delete: { type: Boolean, default: true },
+        export: { type: Boolean, default: true },
+      },
+      projects: {
+        view: { type: Boolean, default: true },
+        create: { type: Boolean, default: true },
+        edit: { type: Boolean, default: true },
+        delete: { type: Boolean, default: true },
+        export: { type: Boolean, default: true },
+      },
+      salary: {
+        view: { type: Boolean, default: true },
+        create: { type: Boolean, default: true },
+        edit: { type: Boolean, default: true },
+        export: { type: Boolean, default: true },
+      },
+      attendance: {
+        view: { type: Boolean, default: true },
+        create: { type: Boolean, default: true },
+        edit: { type: Boolean, default: true },
+        export: { type: Boolean, default: true },
+      },
+      quotation: {
+        view: { type: Boolean, default: true },
+        create: { type: Boolean, default: true },
+        edit: { type: Boolean, default: true },
+        delete: { type: Boolean, default: true },
+        export: { type: Boolean, default: true },
+      },
+      reports: {
+        view: { type: Boolean, default: true },
+        export: { type: Boolean, default: true },
+      },
+      notifications: {
+        view: { type: Boolean, default: true },
+        create: { type: Boolean, default: true },
+      },
+      administration: {
+        view: { type: Boolean, default: true },
+        edit: { type: Boolean, default: true },
+      },
+    },
+    resetPasswordOtp: {
+      type: String,
+    },
+    resetPasswordOtpExpire: {
+      type: Date,
     },
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 // Hash password before saving
-UserSchema.pre('save', async function (next) {
-  if (!this.isModified('password')) return next();
+UserSchema.pre("save", async function (next) {
+  if (!this.isModified("password")) return next();
   try {
     const salt = await bcrypt.genSalt(10);
     this.password = await bcrypt.hash(this.password, salt);
@@ -123,7 +190,7 @@ UserSchema.methods.comparePassword = async function (candidatePassword) {
 };
 
 // Transform: remove sensitive fields from JSON output
-UserSchema.set('toJSON', {
+UserSchema.set("toJSON", {
   transform: function (doc, ret) {
     delete ret.password;
     delete ret.__v;
@@ -131,4 +198,4 @@ UserSchema.set('toJSON', {
   },
 });
 
-module.exports = mongoose.model('User', UserSchema);
+module.exports = mongoose.model("User", UserSchema);

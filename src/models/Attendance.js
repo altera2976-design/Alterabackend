@@ -55,7 +55,7 @@ const AttendanceSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
-    // ── Selfie Attendance Fields ─────────────────────────────────────────────
+    // ── Geofence Data ──────────────────────────────────────────────────────────
     checkInSelfie: {
       type: String, // Relative storage path e.g. "uploads/attendance_selfies/..."
     },

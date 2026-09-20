@@ -32,7 +32,22 @@ router.get('/:id', employeeController.getEmployee);
 // PUT /api/employees/:id
 router.put('/:id', employeeController.updateEmployee);
 
-// PATCH /api/employees/:id/status
+// Account Status — support PUT, POST, PATCH
+router.put('/:id/status', employeeController.toggleStatus);
+router.post('/:id/status', employeeController.toggleStatus);
 router.patch('/:id/status', employeeController.toggleStatus);
+
+// Reset Password — support PUT, POST, PATCH
+router.put('/:id/reset-password', employeeController.resetPassword);
+router.post('/:id/reset-password', employeeController.resetPassword);
+router.patch('/:id/reset-password', employeeController.resetPassword);
+
+// Panel Access — support PUT, POST, PATCH
+router.put('/:id/panel-access', employeeController.togglePanelAccess);
+router.post('/:id/panel-access', employeeController.togglePanelAccess);
+// Delete user account — support DELETE, POST, PUT
+router.delete('/:id', employeeController.deleteEmployee);
+router.post('/:id/delete', employeeController.deleteEmployee);
+router.put('/:id/delete', employeeController.deleteEmployee);
 
 module.exports = router;

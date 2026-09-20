@@ -11,6 +11,7 @@ const Lead = require('../models/Lead');
 const Invoice = require('../models/Invoice');
 const Expense = require('../models/Expense');
 const LeaveRequest = require('../models/LeaveRequest');
+const BikeTracking = require('../models/BikeTracking');
 
 exports.getDashboardStats = async (req, res, next) => {
   try {
@@ -46,6 +47,8 @@ exports.getDashboardStats = async (req, res, next) => {
         overdueTasksCount,
         recentLeadsList,
         upcomingTasksList,
+        activeBikeSessionsList,
+        recentBikeHistoryList,
       ] = await Promise.all([
         User.countDocuments({ role: 'EMPLOYEE' }),
         User.countDocuments({ role: 'EMPLOYEE', status: 'ACTIVE' }),
@@ -69,6 +72,8 @@ exports.getDashboardStats = async (req, res, next) => {
         Task.countDocuments({ status: { $ne: 'Completed' }, dueDate: { $lt: now } }),
         Lead.find().sort({ createdAt: -1 }).limit(5),
         Task.find({ status: { $ne: 'Completed' } }).sort({ dueDate: 1 }).limit(5),
+        BikeTracking.find({ status: 'ACTIVE' }).sort({ startTime: -1 }),
+        BikeTracking.find({ status: 'COMPLETED' }).sort({ stopTime: -1 }).limit(20),
       ]);
 
       const conversionRate = totalLeads > 0 ? Number(((convertedLeads / totalLeads) * 100).toFixed(1)) : 0;
@@ -148,6 +153,14 @@ exports.getDashboardStats = async (req, res, next) => {
         { stage: 'Converted', count: convertedLeads },
       ];
 
+      // Bike Tracking Metrics Aggregation
+      const allBikeSessions = await BikeTracking.find();
+      const totalBikeDistance = Number(allBikeSessions.reduce((acc, s) => acc + (s.distanceKm || 0), 0).toFixed(2));
+      const todayBikeSessions = allBikeSessions.filter(s => s.date === todayStr);
+      const todayBikeDistance = Number(todayBikeSessions.reduce((acc, s) => acc + (s.distanceKm || 0), 0).toFixed(2));
+      const totalBikeTrips = allBikeSessions.length;
+      const completedBikeTrips = allBikeSessions.filter(s => s.status === 'COMPLETED').length;
+
       return res.status(200).json({
         success: true,
         role: 'ADMIN',
@@ -173,6 +186,15 @@ exports.getDashboardStats = async (req, res, next) => {
           pendingLeave: pendingLeaves,
           pendingTasks: pendingTasksCount,
           overdueTasks: overdueTasksCount,
+
+          // Bike Tracking Live & Totals
+          totalBikeDistance,
+          todayBikeDistance,
+          totalBikeTrips,
+          completedBikeTrips,
+          activeBikeCount: activeBikeSessionsList.length,
+          activeBikeSessions: activeBikeSessionsList,
+          recentBikeHistory: recentBikeHistoryList,
 
           // Detailed breakdowns for clean dashboard layout
           projectSummary: {

@@ -63,4 +63,13 @@ router.get('/me', protect, authController.getMe);
 // PUT /api/auth/profile  (protected)
 router.put('/profile', protect, authController.updateProfile);
 
+// POST /api/auth/profile-image (protected)
+router.post('/profile-image', protect, authController.uploadProfileImage);
+
+// POST /api/auth/forgot-password (public)
+router.post('/forgot-password', authLimiter, authController.forgotPassword);
+
+// POST /api/auth/reset-password (public)
+router.post('/reset-password', authLimiter, authController.resetPassword);
+
 module.exports = router;
