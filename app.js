@@ -88,7 +88,12 @@ app.use(
 app.use("/api/bike", require("./src/routes/bikeTrackingRoutes"));
 
 app.use("/api/quotations", require("./src/routes/quotationRoutes"));
+app.use("/api/quotation", require("./src/routes/quotationRoutes"));
 app.use("/api/offer-letters", require("./src/routes/offerLetterRoutes"));
+app.use("/api/offerletters", require("./src/routes/offerLetterRoutes"));
+app.use("/api/offer_letters", require("./src/routes/offerLetterRoutes"));
+app.use("/api/offer-letter", require("./src/routes/offerLetterRoutes"));
+app.use("/api/offerletter", require("./src/routes/offerLetterRoutes"));
 app.use("/api/settings", require("./src/routes/settingRoutes"));
 app.use("/api/crm", require("./src/routes/crmRoutes"));
 app.use("/api/finance", require("./src/routes/financeRoutes"));
