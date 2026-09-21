@@ -5,77 +5,77 @@ const DEFAULT_RULES = [
   {
     ruleNumber: 1,
     title: 'Client Communication & Personal Contact',
-    description: 'Employees must maintain strict professional communication with clients through official company channels only. Sharing personal contact numbers, personal social media profiles, or engaging in personal conversations with clients without prior authorization is strictly prohibited.',
+    description: "Employees must not share or use personal mobile numbers, personal email IDs or private social-media accounts for direct client communication without written authorization. All official client communication must be made through the company's authorized office number / official communication channels.",
   },
   {
     ruleNumber: 2,
     title: 'No Personal Work During Office Hours',
-    description: 'Working hours are dedicated exclusively to company tasks, client projects, and business responsibilities. Engaging in freelance work, personal business activities, or non-work-related tasks during official working hours is prohibited.',
+    description: 'During working hours, employees must devote their time and attention to the company. Employees shall not perform work, assignments, freelance projects or business activities for any other client / company during office hours.',
   },
   {
     ruleNumber: 3,
     title: 'Confidentiality',
-    description: 'You will have access to sensitive company data, client information, designs, financial records, and operational strategies. All such information must remain strictly confidential during and after your tenure with the company.',
+    description: 'All client information, quotations, designs, drawings, measurements, vendor details, pricing, project information, documents, passwords and other company information must be kept strictly confidential and must not be shared with unauthorized persons.',
   },
   {
     ruleNumber: 4,
     title: 'Client & Company Property',
-    description: 'All hardware, software tools, designs, data files, prototypes, and physical assets issued by or created for the company remain the exclusive property of Altera Interior. Company assets must be handled with care and returned upon request or exit.',
+    description: 'Client documents, samples, keys, drawings, photographs, files, software access, company devices and other materials must be handled responsibly and returned when requested or upon separation from the company.',
   },
   {
     ruleNumber: 5,
     title: 'Professional Conduct',
-    description: 'Employees are expected to represent Altera Interior with high standards of professionalism, integrity, ethical conduct, and respect toward colleagues, management, sub-contractors, and clients at all times.',
+    description: 'Employees must maintain professional behaviour, punctuality, appropriate communication and respectful conduct with clients, management, colleagues, vendors and contractors.',
   },
   {
     ruleNumber: 6,
     title: 'Attendance & Punctuality',
-    description: 'Adherence to designated working hours and punctual attendance is compulsory. In case of unexpected delay or emergency, immediate notification to your Reporting Manager or HR department is required.',
+    description: 'Employees are expected to report on time and follow the working hours, attendance system and leave procedure prescribed by the company.',
   },
   {
     ruleNumber: 7,
     title: 'Leave & Absence',
-    description: 'All leave requests must be submitted in advance through the company HR portal and approved by your Reporting Manager. Unapproved absences may lead to pro-rata salary deduction and disciplinary action.',
+    description: 'Planned leave should be requested and approved in advance. In case of an emergency or unavoidable absence, the employee must inform the reporting manager / office at the earliest possible time.',
   },
   {
     ruleNumber: 8,
     title: 'Notice Period',
-    description: 'Either party may terminate the employment relationship by providing the specified written notice period or equivalent salary in lieu thereof, subject to proper handover completion and company approval.',
+    description: "An employee intending to resign or discontinue employment must provide at least 15 days' prior written notice to the company, unless otherwise agreed in writing by management.",
   },
   {
     ruleNumber: 9,
     title: 'Handover on Exit',
-    description: 'Upon resignation or termination, you must complete a formal handover of all ongoing projects, documentation, credentials, access keys, and physical assets to the designated authority before final clearance.',
+    description: 'Before leaving the company, the employee must complete pending responsibilities and provide a proper handover of files, client information, project status, passwords, company property and other work-related materials.',
   },
   {
     ruleNumber: 10,
     title: 'Conflict of Interest',
-    description: 'You shall not engage in any business, consultancy, or employment that directly or indirectly competes with Altera Interior or conflicts with your duty of loyalty to the company.',
+    description: "Employees must disclose any situation that may create a conflict between their personal interests and the company's interests. No employee may use company clients, leads or resources for personal commercial benefit.",
   },
   {
     ruleNumber: 11,
     title: 'No Unauthorized Commitments',
-    description: 'No employee has the authority to make financial, legal, or commercial commitments, agreements, or discounts on behalf of Altera Interior without explicit written consent from Super Admin.',
+    description: 'Employees must not promise prices, discounts, timelines, designs, refunds, services or other commitments to clients on behalf of the company without authorization.',
   },
   {
     ruleNumber: 12,
     title: 'Use of Company Resources',
-    description: 'Company internet, computer systems, email accounts, and software tools must be used solely for legitimate business purposes. Unauthorized downloads, illegal software, or misuse of IT assets is strictly banned.',
+    description: 'Company systems, software, internet, devices, documents and other resources must be used responsibly and primarily for official work.',
   },
   {
     ruleNumber: 13,
     title: 'Social Media & Public Communication',
-    description: 'Public statements, press comments, or social media posts regarding company operations, clients, internal matters, or proprietary designs require prior written approval from management.',
+    description: 'Employees must not publish confidential project information, client details, internal documents or statements representing the company without authorization.',
   },
   {
     ruleNumber: 14,
     title: 'Policy Updates',
-    description: 'Altera Interior reserves the right to amend, update, or implement new internal rules, employee handbooks, and working policies as necessary for business operational excellence.',
+    description: 'The company may update its internal policies, procedures and operational guidelines from time to time. Employees are expected to comply with applicable updated policies communicated by management.',
   },
   {
     ruleNumber: 15,
     title: 'Disciplinary Action',
-    description: 'Violation of company policies, misconduct, breach of confidentiality, or gross negligence will result in disciplinary procedures up to and including immediate termination without notice.',
+    description: 'Violation of company rules, misuse of confidential information, unauthorized client dealing, fraud, serious misconduct or repeated non-compliance may result in disciplinary action, up to and including termination, subject to applicable law and company policy.',
   },
 ];
 
@@ -117,12 +117,12 @@ const OfferLetterSchema = new mongoose.Schema(
     },
     fatherGuardianName: {
       type: String,
-      required: [true, 'Father / Guardian name is required'],
+      default: 'N/A',
       trim: true,
     },
     address: {
       type: String,
-      required: [true, 'Residential address is required'],
+      default: 'N/A',
       trim: true,
     },
     mobile: {

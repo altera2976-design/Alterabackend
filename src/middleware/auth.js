@@ -36,8 +36,8 @@ const protect = async (req, res, next) => {
       });
     }
 
-    if (user.email === 'admin@company.com') {
-      user.role = 'ADMIN';
+    if (user.email === 'admin@company.com' || user.email === 'admin@alterainterior.com') {
+      user.role = 'SUPER_ADMIN';
     }
 
     req.user = user;
@@ -56,13 +56,21 @@ const protect = async (req, res, next) => {
  */
 const authorize = (...roles) => {
   return (req, res, next) => {
-    const userRole = req.user?.role;
-    const isSuper = userRole === 'SUPER_ADMIN';
-    const isAdmin = userRole === 'ADMIN' || isSuper;
+    const userRole = (req.user?.role || '').toUpperCase();
+    const userEmail = (req.user?.email || '').toLowerCase();
+    const isSuper = userRole === 'SUPER_ADMIN' || userEmail === 'admin@alterainterior.com' || userEmail === 'admin@company.com';
+    const isAdmin = userRole === 'ADMIN' || userRole.includes('ADMIN') || isSuper;
 
-    if (isSuper || roles.includes(userRole) || (roles.includes('ADMIN') && isAdmin)) {
+    const normalizedRoles = roles.map((r) => String(r).toUpperCase());
+
+    if (
+      isSuper ||
+      normalizedRoles.includes(userRole) ||
+      (normalizedRoles.includes('ADMIN') && isAdmin)
+    ) {
       return next();
     }
+
     return res.status(403).json({
       success: false,
       message: `Access denied. Role '${userRole}' is not authorized for this action.`,
@@ -70,40 +78,80 @@ const authorize = (...roles) => {
   };
 };
 
+
 /**
  * checkPermission middleware - Verifies granular module permission for current user
  * Usage: checkPermission('crm', 'create') or checkPermission('tasks', 'assign')
  */
 const checkPermission = (moduleName, action = 'view') => {
   return (req, res, next) => {
-    const userRole = req.user?.role;
-    if (userRole === 'SUPER_ADMIN' || req.user?.email?.toLowerCase() === 'admin@alterainterior.com') {
+    const userRole = (req.user?.role || '').toUpperCase();
+    const userEmail = (req.user?.email || '').toLowerCase();
+    const isSuper = userRole === 'SUPER_ADMIN' || userEmail === 'admin@alterainterior.com' || userEmail === 'admin@company.com';
+
+    // 1. Super Admins always have full access
+    if (isSuper) {
       return next();
     }
 
+    // 2. Active status check
     if (req.user?.status === 'INACTIVE') {
       return res.status(401).json({
         success: false,
-        message: 'Your account has been deactivated.',
+        message: 'Your account has been deactivated. Please contact the Super Admin.',
       });
     }
 
+    // 3. Admin Panel Access check
     if (req.user?.isAdminPanelEnabled === false) {
       return res.status(403).json({
         success: false,
-        message: 'Admin Panel access is disabled for your account.',
+        message: 'Admin Dashboard access has been revoked. Please contact the Super Admin.',
       });
     }
 
-    const modPerms = req.user?.permissions?.[moduleName];
+    // Convert keys: e.g. offerLetters <-> offer_letters
+    const altModuleName = moduleName.includes('_')
+      ? moduleName.replace(/_([a-z])/g, (_, g) => g.toUpperCase())
+      : moduleName.replace(/([A-Z])/g, '_$1').toLowerCase();
 
-    if (modPerms) {
-      if (typeof modPerms === 'boolean' && modPerms === true) {
-        return next();
+    const perms = req.user?.permissions || {};
+    const modPerms = perms[moduleName] !== undefined ? perms[moduleName] : perms[altModuleName];
+
+    if (modPerms !== undefined) {
+      if (typeof modPerms === 'boolean') {
+        if (modPerms === true) return next();
+        if (modPerms === false) {
+          return res.status(403).json({
+            success: false,
+            message: `Access denied. You do not have permission for ${moduleName}.`,
+          });
+        }
+      } else if (typeof modPerms === 'object' && modPerms !== null) {
+        if (modPerms[action] === true) return next();
+        if (modPerms[action] === false || (action === 'view' && modPerms.view === false)) {
+          return res.status(403).json({
+            success: false,
+            message: `Access denied. You do not have permission to ${action} in ${moduleName}.`,
+          });
+        }
       }
-      if (typeof modPerms === 'object' && modPerms[action] === true) {
-        return next();
-      }
+    }
+
+    // Admin role has access unless explicitly forbidden above
+    if (userRole === 'ADMIN' || userRole.includes('ADMIN')) {
+      return next();
+    }
+
+    // Default: allow viewing resources (GET requests) for all active authenticated users
+    if (action === 'view') {
+      return next();
+    }
+
+    // Allow management roles for creation/editing actions unless explicitly disabled above
+    const managementRoles = ['MANAGER', 'SALES', 'PROJECT_MANAGER', 'DESIGNER', 'EMPLOYEE'];
+    if (managementRoles.some((r) => userRole.includes(r))) {
+      return next();
     }
 
     return res.status(403).json({
@@ -112,5 +160,7 @@ const checkPermission = (moduleName, action = 'view') => {
     });
   };
 };
+
+
 
 module.exports = { protect, authorize, checkPermission };

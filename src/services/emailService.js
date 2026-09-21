@@ -439,11 +439,99 @@ const sendPasswordResetOtp = async (to, otp) => {
   }
 };
 
+/**
+ * Send Offer Letter Email to Candidate
+ */
+const sendOfferLetterEmail = async ({
+  to,
+  candidateName,
+  designation,
+  joiningDate,
+  offerLetterNumber,
+  publicUrl,
+  attachments = [],
+}) => {
+  const html = `
+    <div style="font-family: Arial, sans-serif; padding: 24px; max-width: 650px; margin: 0 auto; border: 1px solid #E2E8F0; border-radius: 12px; background-color: #FFFFFF;">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <h2 style="color: #9F0B22; margin: 0 0 6px 0; font-size: 24px;">Altera Interior</h2>
+        <p style="color: #64748B; font-size: 13px; margin: 0; text-transform: uppercase; letter-spacing: 1px;">Official Employment Offer</p>
+      </div>
+
+      <p style="font-size: 15px; color: #1E293B; line-height: 1.6;">
+        Dear <strong>${candidateName}</strong>,
+      </p>
+
+      <p style="font-size: 15px; color: #334155; line-height: 1.6;">
+        We are delighted to offer you the position of <strong>${designation}</strong> at <strong>Altera Interior</strong>! 
+        Your expected joining date is <strong>${joiningDate}</strong>.
+      </p>
+
+      <div style="background-color: #F8FAFC; border-left: 4px solid #9F0B22; padding: 16px; margin: 24px 0; border-radius: 4px;">
+        <p style="margin: 0 0 8px 0; font-size: 14px; color: #475569;">
+          <strong>Offer Letter Ref:</strong> ${offerLetterNumber}
+        </p>
+        <p style="margin: 0; font-size: 14px; color: #475569;">
+          <strong>Designation:</strong> ${designation}
+        </p>
+      </div>
+
+      <p style="font-size: 14px; color: #334155; line-height: 1.6;">
+        Please find your official Offer Letter attached to this email as a PDF document.
+      </p>
+
+      ${
+        publicUrl
+          ? `
+      <div style="text-align: center; margin: 30px 0;">
+        <a href="${publicUrl}" target="_blank" style="background-color: #9F0B22; color: #FFFFFF; padding: 12px 28px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 14px; display: inline-block;">
+          View & Respond Online
+        </a>
+      </div>
+      `
+          : ""
+      }
+
+      <hr style="border: none; border-top: 1px solid #E2E8F0; margin: 28px 0 16px 0;" />
+      <p style="font-size: 12px; color: #94A3B8; text-align: center; margin: 0;">
+        © ${new Date().getFullYear()} Altera Interior. All rights reserved.
+      </p>
+    </div>
+  `;
+
+  const mailOptions = {
+    from: process.env.EMAIL_FROM || '"Altera HR" <hr@alterainterior.com>',
+    to,
+    subject: `Employment Offer Letter (${offerLetterNumber}) - Altera Interior`,
+    html,
+    attachments: attachments.map((att) => ({
+      filename: att.filename,
+      content:
+        typeof att.content === "string"
+          ? Buffer.from(att.content, att.encoding || "base64")
+          : att.content,
+      contentType: att.contentType || "application/pdf",
+    })),
+  };
+
+  try {
+    const activeTransporter = await getTransporter();
+    const info = await activeTransporter.sendMail(mailOptions);
+    console.log(`✅ Offer letter email sent to ${to}. MessageId: ${info.messageId}`);
+    return { success: true, messageId: info.messageId };
+  } catch (error) {
+    console.error("❌ Error sending offer letter email:", error);
+    throw error;
+  }
+};
+
 module.exports = {
   sendVerificationEmail,
   sendReportEmail,
   sendPayslipEmail,
   sendQuotationEmail,
+  sendOfferLetterEmail,
   sendPasswordResetOtp,
   getTransporter,
 };
+

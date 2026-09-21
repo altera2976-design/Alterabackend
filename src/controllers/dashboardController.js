@@ -13,6 +13,8 @@ const Expense = require('../models/Expense');
 const LeaveRequest = require('../models/LeaveRequest');
 const BikeTracking = require('../models/BikeTracking');
 
+const OfferLetter = require('../models/OfferLetter');
+
 exports.getDashboardStats = async (req, res, next) => {
   try {
     const user = req.user;
@@ -39,16 +41,19 @@ exports.getDashboardStats = async (req, res, next) => {
         todayPresent,
         todayLate,
         todayLeave,
+        todayAbsent,
         pendingLeaves,
         totalLeads,
         newLeads,
         convertedLeads,
         pendingTasksCount,
         overdueTasksCount,
+        pendingOfferLetters,
         recentLeadsList,
         upcomingTasksList,
         activeBikeSessionsList,
         recentBikeHistoryList,
+        allPayrolls,
       ] = await Promise.all([
         User.countDocuments({ role: 'EMPLOYEE' }),
         User.countDocuments({ role: 'EMPLOYEE', status: 'ACTIVE' }),
@@ -64,17 +69,21 @@ exports.getDashboardStats = async (req, res, next) => {
         Attendance.countDocuments({ date: todayStr, status: 'PRESENT' }),
         Attendance.countDocuments({ date: todayStr, status: 'LATE' }),
         Attendance.countDocuments({ date: todayStr, status: 'LEAVE' }),
+        Attendance.countDocuments({ date: todayStr, status: 'ABSENT' }),
         LeaveRequest.countDocuments({ status: 'Pending' }),
         Lead.countDocuments(),
         Lead.countDocuments({ status: 'New Lead' }),
         Lead.countDocuments({ status: 'Converted' }),
         Task.countDocuments({ status: { $ne: 'Completed' } }),
         Task.countDocuments({ status: { $ne: 'Completed' }, dueDate: { $lt: now } }),
+        OfferLetter.countDocuments({ status: { $in: ['DRAFT', 'GENERATED', 'SENT'] } }),
         Lead.find().sort({ createdAt: -1 }).limit(5),
         Task.find({ status: { $ne: 'Completed' } }).sort({ dueDate: 1 }).limit(5),
         BikeTracking.find({ status: 'ACTIVE' }).sort({ startTime: -1 }),
         BikeTracking.find({ status: 'COMPLETED' }).sort({ stopTime: -1 }).limit(20),
+        Payroll.find().select('netSalary totalSalary status'),
       ]);
+
 
       const conversionRate = totalLeads > 0 ? Number(((convertedLeads / totalLeads) * 100).toFixed(1)) : 0;
       const todayAttendanceCount = todayPresent + todayLate;
@@ -174,6 +183,7 @@ exports.getDashboardStats = async (req, res, next) => {
           completedProjects,
           pendingQuotations,
           approvedQuotations,
+          pendingOfferLetters,
           quotationValue,
           totalSales,
           totalRevenue,
@@ -183,6 +193,11 @@ exports.getDashboardStats = async (req, res, next) => {
           projectProfit,
           employees: totalEmployees,
           todayAttendance: todayAttendanceCount,
+          todayPresent,
+          todayLate,
+          todayAbsent,
+          attendancePercentage: totalEmployees > 0 ? Number(((todayAttendanceCount / totalEmployees) * 100).toFixed(1)) : 0,
+          totalPayrollAmount: allPayrolls.reduce((acc, p) => acc + (p.netSalary || p.totalSalary || 0), 0),
           pendingLeave: pendingLeaves,
           pendingTasks: pendingTasksCount,
           overdueTasks: overdueTasksCount,

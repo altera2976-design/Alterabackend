@@ -64,12 +64,15 @@ exports.createEmployee = async (req, res, next) => {
     }
 
     const isCompromised = await isPasswordCompromised(password);
-    if (isCompromised) {
+    const requesterIsSuper = req.user?.role === 'SUPER_ADMIN' || req.user?.email === 'admin@alterainterior.com' || req.user?.email === 'admin@company.com';
+
+    if (isCompromised && !requesterIsSuper) {
       return res.status(400).json({
         success: false,
         message: 'This password has appeared in a data breach. Please choose a stronger password.'
       });
     }
+
 
     // Auto-generate unique employee ID
     const employeeId = await generateEmployeeId();
@@ -154,6 +157,17 @@ exports.updateEmployee = async (req, res, next) => {
 
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found.' });
+    }
+
+    const requesterIsSuper = req.user?.role === 'SUPER_ADMIN' || req.user?.email === 'admin@alterainterior.com' || req.user?.email === 'admin@company.com';
+    const targetIsSuper = user.role === 'SUPER_ADMIN' || user.email === 'admin@alterainterior.com' || user.email === 'admin@company.com';
+
+    if (targetIsSuper && !requesterIsSuper) {
+      return res.status(403).json({ success: false, message: 'Only Super Admin can modify a Super Admin account.' });
+    }
+
+    if (role && role.toUpperCase() === 'SUPER_ADMIN' && !requesterIsSuper) {
+      return res.status(403).json({ success: false, message: 'Only Super Admin can assign the Super Admin role.' });
     }
 
     if (name !== undefined) user.name = name;

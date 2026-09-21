@@ -67,6 +67,7 @@ app.use(generalLimiter);
 app.use("/api/health", require("./src/routes/health"));
 app.use("/api/auth", require("./src/routes/auth"));
 app.use("/api/employees", require("./src/routes/employees"));
+app.use("/api/users", require("./src/routes/employees"));
 app.use("/api/attendance", require("./src/routes/attendanceRoutes"));
 app.use("/api/payroll", require("./src/routes/payrollRoutes"));
 app.use("/api/locations", require("./src/routes/locationRoutes"));
@@ -80,10 +81,14 @@ app.use("/api/dashboard", require("./src/routes/dashboardRoutes"));
 app.use("/api/reports", require("./src/routes/reportRoutes"));
 app.use("/api/trips", require("./src/routes/tripRoutes"));
 app.use("/api/bike-tracking", require("./src/routes/bikeTrackingRoutes"));
-app.use("/api/attendance/bike-tracking", require("./src/routes/bikeTrackingRoutes"));
+app.use(
+  "/api/attendance/bike-tracking",
+  require("./src/routes/bikeTrackingRoutes"),
+);
 app.use("/api/bike", require("./src/routes/bikeTrackingRoutes"));
 
 app.use("/api/quotations", require("./src/routes/quotationRoutes"));
+app.use("/api/offer-letters", require("./src/routes/offerLetterRoutes"));
 app.use("/api/settings", require("./src/routes/settingRoutes"));
 app.use("/api/crm", require("./src/routes/crmRoutes"));
 app.use("/api/finance", require("./src/routes/financeRoutes"));
