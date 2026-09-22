@@ -178,8 +178,8 @@ const QuotationSchema = new mongoose.Schema(
       gstPercent: { type: Number, default: 18 },
       gstType: {
         type: String,
-        enum: ['CGST_SGST', 'IGST'],
-        default: 'CGST_SGST',
+        enum: ['CGST_SGST', 'IGST', 'AS_PER_ACTUAL'],
+        default: 'AS_PER_ACTUAL',
       },
       cgstAmount: { type: Number, default: 0 },
       sgstAmount: { type: Number, default: 0 },

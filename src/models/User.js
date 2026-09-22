@@ -159,12 +159,30 @@ const UserSchema = new mongoose.Schema(
         view: { type: Boolean, default: true },
         edit: { type: Boolean, default: true },
       },
+      transactions: {
+        view: { type: Boolean, default: true },
+        create: { type: Boolean, default: true },
+        edit: { type: Boolean, default: true },
+        delete: { type: Boolean, default: false },
+        viewDetails: { type: Boolean, default: true },
+        viewSummary: { type: Boolean, default: true },
+        export: { type: Boolean, default: true },
+        refund: { type: Boolean, default: false },
+        viewAll: { type: Boolean, default: false },
+      },
     },
     resetPasswordOtp: {
       type: String,
+      select: false,
     },
     resetPasswordOtpExpire: {
       type: Date,
+      select: false,
+    },
+    resetPasswordAttempts: {
+      type: Number,
+      default: 0,
+      select: false,
     },
   },
   {

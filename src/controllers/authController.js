@@ -7,9 +7,9 @@ const { OAuth2Client } = require("google-auth-library");
 const crypto = require("crypto");
 const { sendPasswordResetOtp } = require("../services/emailService");
 
-// Helper to generate a 6-digit OTP
+// Helper to generate a cryptographically secure 6-digit OTP
 const generateOTP = () => {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  return crypto.randomInt(100000, 1000000).toString();
 };
 
 const googleClient = new OAuth2Client();
@@ -570,33 +570,42 @@ exports.googleLogin = async (req, res, next) => {
 exports.forgotPassword = async (req, res, next) => {
   try {
     const { email } = req.body;
-    if (!email) {
-      return res.status(400).json({ success: false, message: 'Please provide an email' });
+    const genericResponse = {
+      success: true,
+      message: "If the account exists, a password reset instruction has been sent.",
+    };
+
+    if (!email || typeof email !== "string" || !email.trim()) {
+      return res.status(400).json({ success: false, message: "Please provide a valid email." });
     }
 
-    const user = await User.findOne({ email: email.toLowerCase() });
+    const cleanEmail = email.toLowerCase().trim();
+    const user = await User.findOne({ email: cleanEmail });
+
     if (!user) {
-      // Return success even if user not found to prevent email enumeration
-      return res.status(200).json({ success: true, message: 'If an account with that email exists, an OTP has been sent.' });
+      // Prevent account enumeration: Return identical success response for non-existent user
+      return res.status(200).json(genericResponse);
     }
 
     const otp = generateOTP();
-    // Valid for 10 minutes
-    const expireTime = new Date(Date.now() + 10 * 60 * 1000);
+    // Hash OTP using SHA-256 before storing in database
+    const otpHash = crypto.createHash("sha256").update(otp).digest("hex");
+    const expireTime = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
-    user.resetPasswordOtp = otp;
+    user.resetPasswordOtp = otpHash;
     user.resetPasswordOtpExpire = expireTime;
+    user.resetPasswordAttempts = 0;
     await user.save();
 
-    const emailSent = await sendPasswordResetOtp(user.email, otp);
-    if (!emailSent) {
-      user.resetPasswordOtp = undefined;
-      user.resetPasswordOtpExpire = undefined;
-      await user.save();
-      return res.status(500).json({ success: false, message: 'Failed to send OTP email. Please try again later.' });
+    // Send email with plain-text OTP
+    try {
+      await sendPasswordResetOtp(user.email, otp);
+    } catch (emailErr) {
+      console.error("❌ Failed to send password reset email:", emailErr.message);
+      // Log failure internally but still return generic response to protect user privacy
     }
 
-    res.status(200).json({ success: true, message: 'OTP sent successfully to your email.' });
+    res.status(200).json(genericResponse);
   } catch (error) {
     next(error);
   }
@@ -609,27 +618,81 @@ exports.forgotPassword = async (req, res, next) => {
  */
 exports.resetPassword = async (req, res, next) => {
   try {
-    const { email, otp, newPassword } = req.body;
+    const { email, otp, newPassword, confirmPassword } = req.body;
+
     if (!email || !otp || !newPassword) {
-      return res.status(400).json({ success: false, message: 'Please provide email, OTP, and new password' });
+      return res.status(400).json({ success: false, message: "Please provide email, OTP, and new password." });
     }
 
-    const user = await User.findOne({
-      email: email.toLowerCase(),
-      resetPasswordOtp: otp,
-      resetPasswordOtpExpire: { $gt: Date.now() },
-    });
-
-    if (!user) {
-      return res.status(400).json({ success: false, message: 'Invalid or expired OTP' });
+    if (confirmPassword && newPassword !== confirmPassword) {
+      return res.status(400).json({ success: false, message: "New password and confirm password do not match." });
     }
 
+    const cleanEmail = String(email).toLowerCase().trim();
+    const cleanOtp = String(otp).trim();
+
+    // Explicitly select hidden OTP fields
+    const user = await User.findOne({ email: cleanEmail }).select(
+      "+resetPasswordOtp +resetPasswordOtpExpire +resetPasswordAttempts"
+    );
+
+    const genericInvalidMsg = { success: false, message: "Invalid or expired OTP." };
+
+    if (!user || !user.resetPasswordOtp || !user.resetPasswordOtpExpire) {
+      return res.status(400).json(genericInvalidMsg);
+    }
+
+    // Check expiration
+    if (Date.now() > user.resetPasswordOtpExpire.getTime()) {
+      user.resetPasswordOtp = undefined;
+      user.resetPasswordOtpExpire = undefined;
+      user.resetPasswordAttempts = 0;
+      await user.save();
+      return res.status(400).json(genericInvalidMsg);
+    }
+
+    // Check failed attempt limit (max 5 failed attempts per reset session)
+    if ((user.resetPasswordAttempts || 0) >= 5) {
+      user.resetPasswordOtp = undefined;
+      user.resetPasswordOtpExpire = undefined;
+      user.resetPasswordAttempts = 0;
+      await user.save();
+      return res.status(400).json(genericInvalidMsg);
+    }
+
+    // Verify OTP hash
+    const inputHash = crypto.createHash("sha256").update(cleanOtp).digest("hex");
+    const storedHash = user.resetPasswordOtp;
+
+    let isMatch = false;
+    try {
+      isMatch = crypto.timingSafeEqual(Buffer.from(inputHash, "hex"), Buffer.from(storedHash, "hex"));
+    } catch (e) {
+      isMatch = false;
+    }
+
+    if (!isMatch) {
+      user.resetPasswordAttempts = (user.resetPasswordAttempts || 0) + 1;
+      if (user.resetPasswordAttempts >= 5) {
+        user.resetPasswordOtp = undefined;
+        user.resetPasswordOtpExpire = undefined;
+        user.resetPasswordAttempts = 0;
+      }
+      await user.save();
+      return res.status(400).json(genericInvalidMsg);
+    }
+
+    // Valid match -> Update password & invalidate OTP session completely
     user.password = newPassword;
     user.resetPasswordOtp = undefined;
     user.resetPasswordOtpExpire = undefined;
+    user.resetPasswordAttempts = 0;
     await user.save();
 
-    res.status(200).json({ success: true, message: 'Password reset successfully. You can now log in.' });
+    res.status(200).json({
+      success: true,
+      message: "Password reset successfully. You can now log in.",
+    });
   } catch (error) {
     next(error);
   }

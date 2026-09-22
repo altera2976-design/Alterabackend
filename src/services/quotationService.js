@@ -235,16 +235,20 @@ function calculateQuotationPricing(items = [], pricingOptions = {}, milestones =
 
   // GST
   const gstPercent = pricingOptions.gstPercent !== undefined ? Number(pricingOptions.gstPercent) : 18;
-  const gstType = pricingOptions.gstType === 'IGST' ? 'IGST' : 'CGST_SGST';
-  const totalGstAmount = Math.round(taxableAmount * (gstPercent / 100));
-
+  const gstType = ['IGST', 'AS_PER_ACTUAL'].includes(pricingOptions.gstType) ? pricingOptions.gstType : 'CGST_SGST';
+  
+  let totalGstAmount = 0;
   let cgstAmount = 0;
   let sgstAmount = 0;
   let igstAmount = 0;
 
-  if (gstType === 'IGST') {
+  if (gstType === 'AS_PER_ACTUAL') {
+    totalGstAmount = 0;
+  } else if (gstType === 'IGST') {
+    totalGstAmount = Math.round(taxableAmount * (gstPercent / 100));
     igstAmount = totalGstAmount;
   } else {
+    totalGstAmount = Math.round(taxableAmount * (gstPercent / 100));
     cgstAmount = Math.round(totalGstAmount / 2);
     sgstAmount = totalGstAmount - cgstAmount;
   }
