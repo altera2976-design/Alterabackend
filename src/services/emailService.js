@@ -439,6 +439,8 @@ const sendPasswordResetOtp = async (to, otp) => {
   }
 };
 
+const { COMPANY_LOGO_DATA_URL } = require('../constants/companyLogo');
+
 /**
  * Send Offer Letter Email to Candidate
  */
@@ -454,7 +456,7 @@ const sendOfferLetterEmail = async ({
   const html = `
     <div style="font-family: Arial, sans-serif; padding: 24px; max-width: 650px; margin: 0 auto; border: 1px solid #E2E8F0; border-radius: 12px; background-color: #FFFFFF;">
       <div style="text-align: center; margin-bottom: 24px;">
-        <h2 style="color: #9F0B22; margin: 0 0 6px 0; font-size: 24px;">Altera Interior</h2>
+        <img src="${COMPANY_LOGO_DATA_URL}" alt="Altera Interior Logo" style="height: 52px; width: auto; max-width: 270px; margin-bottom: 8px;" />
         <p style="color: #64748B; font-size: 13px; margin: 0; text-transform: uppercase; letter-spacing: 1px;">Official Employment Offer</p>
       </div>
 
