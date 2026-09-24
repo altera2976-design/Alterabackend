@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const OfferLetter = require('../models/OfferLetter');
 const { sendOfferLetterEmail } = require('../services/emailService');
+const googleDriveService = require('../services/googleDrive.service');
 
 /**
  * Generate next sequential Offer Letter Number (e.g. OFR-2026-0001)
@@ -460,6 +461,24 @@ const sendOfferLetterEmailAction = async (req, res) => {
 
     const cleanCandidateName = offerLetter.candidateName.replace(/[^a-zA-Z0-9 ]/g, '').replace(/\s+/g, '_');
     const pdfFilename = `Offer_Letter_${cleanCandidateName}_${offerLetter.offerLetterNumber}.pdf`;
+
+    // Upload PDF to Google Drive (Offer Letters folder)
+    if (pdfBase64) {
+      try {
+        const cleanBuf = Buffer.from(pdfBase64.replace(/^data:[^;]+;base64,/, ''), 'base64');
+        const driveRes = await googleDriveService.uploadFileToDrive({
+          buffer: cleanBuf,
+          fileName: pdfFilename,
+          mimeType: 'application/pdf',
+          folderType: 'Offer Letters',
+        });
+        offerLetter.pdfFileName = pdfFilename;
+        offerLetter.pdfDriveFileId = driveRes.driveFileId;
+        offerLetter.pdfUrl = `/api/files/drive/${driveRes.driveFileId}`;
+      } catch (driveErr) {
+        console.error('[offerLetterController] Failed to upload PDF to Google Drive:', driveErr.message);
+      }
+    }
 
     const publicUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/offer-letter/public/${offerLetter.publicToken}`;
 

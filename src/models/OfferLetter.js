@@ -244,6 +244,10 @@ const OfferLetterSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
+    pdfDriveFileId: {
+      type: String,
+      default: '',
+    },
 
     // Audit & Workflow Lifecycle
     createdBy: {

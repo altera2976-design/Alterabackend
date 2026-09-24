@@ -57,9 +57,15 @@ const AttendanceSchema = new mongoose.Schema(
     },
     // ── Geofence Data ──────────────────────────────────────────────────────────
     checkInSelfie: {
-      type: String, // Relative storage path e.g. "uploads/attendance_selfies/..."
+      type: String, // Drive proxy URL or relative storage path
+    },
+    checkInSelfieDriveId: {
+      type: String,
     },
     checkOutSelfie: {
+      type: String,
+    },
+    checkOutSelfieDriveId: {
       type: String,
     },
     checkInLocation: {

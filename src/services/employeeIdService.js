@@ -5,26 +5,32 @@ const User = require("../models/User");
  * @returns {Promise<string>} Next available employee ID
  */
 const generateEmployeeId = async () => {
-  // Find the last employee sorted by employeeId descending
-  const employees = await User.find({
-    role: "EMPLOYEE",
-    employeeId: { $exists: true, $ne: null },
-  })
-    .sort({ createdAt: -1 })
-    .select("employeeId")
-    .limit(1);
+  // Find highest numeric index among existing EMP-XXX IDs
+  const users = await User.find({
+    employeeId: { $regex: /^EMP-\d+$/i },
+  }).select("employeeId");
 
-  if (employees.length === 0) {
-    return "EMP-001";
+  let maxNum = 0;
+  for (const u of users) {
+    if (u.employeeId) {
+      const match = u.employeeId.match(/^EMP-(\d+)$/i);
+      if (match) {
+        const num = parseInt(match[1], 10);
+        if (num > maxNum) maxNum = num;
+      }
+    }
   }
 
-  // Parse the numeric part and increment
-  const lastId = employees[0].employeeId;
-  const parts = typeof lastId === 'string' ? lastId.split("-") : [];
-  const num = parts.length > 1 ? parseInt(parts[1], 10) : NaN;
-  const nextNum = isNaN(num) ? (employees.length + 1) : num + 1;
+  let nextNum = maxNum + 1;
+  let candidate = `EMP-${String(nextNum).padStart(3, "0")}`;
 
-  return `EMP-${String(nextNum).padStart(3, "0")}`;
+  // Safety check: Loop until an unused candidate ID is found
+  while (await User.exists({ employeeId: candidate })) {
+    nextNum++;
+    candidate = `EMP-${String(nextNum).padStart(3, "0")}`;
+  }
+
+  return candidate;
 };
 
 module.exports = { generateEmployeeId };

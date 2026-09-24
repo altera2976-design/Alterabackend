@@ -201,31 +201,54 @@ exports.register = async (req, res, next) => {
         });
     }
 
+    const cleanEmail = email.toLowerCase().trim();
+    const inputEmployeeId = req.body.employeeId ? req.body.employeeId.trim().toUpperCase() : null;
+
     // 2. Check duplicate email
-    const existingUser = await User.findOne({
-      email: email.toLowerCase().trim(),
-    });
+    const existingUser = await User.findOne({ email: cleanEmail });
     if (existingUser) {
       return res
         .status(409)
-        .json({ success: false, message: "Email already exists" });
+        .json({ success: false, message: `Email '${cleanEmail}' is already registered.` });
     }
 
-    // 3. Auto-generate unique employee ID
-    let employeeId;
-    try {
-      employeeId = await generateEmployeeId();
-    } catch (e) {
-      console.warn(
-        "⚠️ Could not generate employeeId automatically:",
-        e.message,
-      );
+    // 3. Check duplicate employee ID if provided in request body
+    if (inputEmployeeId) {
+      const existingEmp = await User.findOne({ employeeId: inputEmployeeId });
+      if (existingEmp) {
+        return res
+          .status(409)
+          .json({ success: false, message: `Employee ID ${inputEmployeeId} is already registered.` });
+      }
     }
 
-    // 4. Create user (password will be hashed in the User schema pre-save hook)
+    // 4. Auto-generate unique employee ID if not provided
+    let employeeId = inputEmployeeId;
+    if (!employeeId) {
+      try {
+        employeeId = await generateEmployeeId();
+      } catch (e) {
+        console.warn(
+          "⚠️ Could not generate employeeId automatically:",
+          e.message,
+        );
+      }
+    }
+
+    // Double-check candidate employeeId does not already exist
+    if (employeeId) {
+      const checkDup = await User.findOne({ employeeId });
+      if (checkDup) {
+        return res
+          .status(409)
+          .json({ success: false, message: `Employee ID ${employeeId} is already registered.` });
+      }
+    }
+
+    // 5. Create user (password will be hashed in the User schema pre-save hook)
     const user = await User.create({
       name: fullName.trim(), // The schema expects 'name'
-      email: email.toLowerCase().trim(),
+      email: cleanEmail,
       password,
       phone: phone ? phone.trim() : "",
       role: "EMPLOYEE",

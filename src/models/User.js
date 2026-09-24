@@ -184,6 +184,21 @@ const UserSchema = new mongoose.Schema(
       default: 0,
       select: false,
     },
+    documents: [
+      {
+        documentType: { type: String, default: 'General Document' },
+        fileName: { type: String },
+        originalName: { type: String },
+        driveFileId: { type: String },
+        driveUrl: { type: String },
+        fileUrl: { type: String },
+        fileType: { type: String },
+        fileSize: { type: Number },
+        folderType: { type: String, default: 'Employee Documents' },
+        uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        uploadedAt: { type: Date, default: Date.now },
+      },
+    ],
   },
   {
     timestamps: true,

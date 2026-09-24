@@ -9,6 +9,7 @@ const Location = require('../models/Location');
 const Setting = require('../models/Setting');
 const User = require('../models/User');
 const { AppError } = require('../middleware/errorHandler');
+const googleDriveService = require('../services/googleDrive.service');
 
 // Haversine formula to calculate distance between two coordinates in meters
 const calculateDistance = (lat1, lon1, lat2, lon2) => {
@@ -450,28 +451,34 @@ exports.markSelfieAttendance = async (req, res, next) => {
       geofenceStatus = 'DISABLED';
     }
 
-    // 3. Save Selfie to Disk
-    const uploadDir = path.join(__dirname, '../../uploads/attendance_selfies');
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
+    // 3. Save Selfie to Google Drive (Attendance folder) with local fallback
+    const safeType = type === 'CHECK_OUT' ? 'checkout' : 'checkin';
+    const filename = `${req.user._id}_${todayStr}_${safeType}_${Date.now()}.jpg`;
+    let relativePath = '';
+    let driveFileId = '';
 
-    // Clean base64 data prefix
     const cleanBase64 = selfieBase64.replace(/^data:image\/\w+;base64,/, '');
     const imageBuffer = Buffer.from(cleanBase64, 'base64');
 
-    if (imageBuffer.length < 500) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid or corrupted selfie image data.',
+    try {
+      const driveRes = await googleDriveService.uploadFileToDrive({
+        buffer: imageBuffer,
+        fileName: filename,
+        mimeType: 'image/jpeg',
+        folderType: 'Attendance',
       });
+      driveFileId = driveRes.driveFileId;
+      relativePath = `/api/files/drive/${driveFileId}`;
+    } catch (driveErr) {
+      console.error('[attendanceController] Google Drive upload failed, saving locally:', driveErr.message);
+      const uploadDir = path.join(__dirname, '../../uploads/attendance_selfies');
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
+      }
+      const fullFilePath = path.join(uploadDir, filename);
+      fs.writeFileSync(fullFilePath, imageBuffer);
+      relativePath = `uploads/attendance_selfies/${filename}`;
     }
-
-    const safeType = type === 'CHECK_OUT' ? 'checkout' : 'checkin';
-    const filename = `${req.user._id}_${todayStr}_${safeType}_${Date.now()}.jpg`;
-    const fullFilePath = path.join(uploadDir, filename);
-    fs.writeFileSync(fullFilePath, imageBuffer);
-    const relativePath = `uploads/attendance_selfies/${filename}`;
 
     // 4. Liveness & Verification Assessment
     let livenessStatus = 'VERIFIED';
@@ -527,6 +534,7 @@ exports.markSelfieAttendance = async (req, res, next) => {
         projectId: projectId || null,
         projectName: projectName || '',
         checkInSelfie: relativePath,
+        checkInSelfieDriveId: driveFileId || null,
         checkInLocation: locationData,
         userLocation: {
           latitude: locationData.latitude,
@@ -585,6 +593,7 @@ exports.markSelfieAttendance = async (req, res, next) => {
 
       existing.checkOutTime = now;
       existing.checkOutSelfie = relativePath;
+      existing.checkOutSelfieDriveId = driveFileId || null;
       existing.checkOutLocation = locationData;
       existing.totalHours = Math.max(0.1, durationHours);
 
@@ -594,6 +603,7 @@ exports.markSelfieAttendance = async (req, res, next) => {
       }
 
       await existing.save();
+      attendanceRecord = existing;
       attendanceRecord = existing;
     } else {
       return res.status(400).json({
@@ -657,9 +667,21 @@ exports.getSelfieImage = async (req, res, next) => {
       });
     }
 
+    const driveId = type === 'checkout' ? attendance.checkOutSelfieDriveId : attendance.checkInSelfieDriveId;
+    if (driveId) {
+      return await googleDriveService.streamDriveFile(driveId, res);
+    }
+
     const relPath = type === 'checkout' ? attendance.checkOutSelfie : attendance.checkInSelfie;
     if (!relPath) {
       return res.status(404).json({ success: false, message: `No ${type} selfie recorded for this session.` });
+    }
+
+    if (relPath.includes('/api/files/drive/')) {
+      const extractedDriveId = relPath.split('/api/files/drive/')[1];
+      if (extractedDriveId) {
+        return await googleDriveService.streamDriveFile(extractedDriveId, res);
+      }
     }
 
     const fullPath = path.resolve(__dirname, '../../', relPath);

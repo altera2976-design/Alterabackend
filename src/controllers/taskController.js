@@ -4,6 +4,9 @@ const AuditLog = require('../models/AuditLog');
 const Notification = require('../models/Notification');
 const User = require('../models/User');
 
+const fs = require('fs');
+const path = require('path');
+
 const emitSocket = (req, event, data) => {
   try {
     const io = req.app.get('io');
@@ -13,8 +16,104 @@ const emitSocket = (req, event, data) => {
   }
 };
 
+const googleDriveService = require('../services/googleDrive.service');
+
+// Helper: Save attachment file to Google Drive (Tasks folder)
+const saveAttachmentFile = async (att, userId, userName) => {
+  if (!att) return null;
+  const fileName = att.fileName || att.name || att.originalName || `task_file_${Date.now()}`;
+  let fileUrl = att.fileUrl || att.url || att.driveUrl || '';
+  let driveFileId = att.driveFileId || '';
+  let driveUrl = att.driveUrl || '';
+  const fileType = att.fileType || att.mimeType || 'application/octet-stream';
+  let fileSize = att.fileSize || 0;
+
+  // If already uploaded to Google Drive
+  if (driveFileId && driveUrl) {
+    return {
+      fileName: fileName,
+      originalName: att.originalName || fileName,
+      name: fileName,
+      driveFileId: driveFileId,
+      driveUrl: driveUrl,
+      fileUrl: fileUrl || `/api/files/drive/${driveFileId}`,
+      url: fileUrl || `/api/files/drive/${driveFileId}`,
+      fileType: fileType,
+      mimeType: fileType,
+      fileSize: fileSize,
+      folderType: 'Tasks',
+      uploadedBy: userId,
+      uploadedByName: userName,
+      uploadedAt: att.uploadedAt || new Date(),
+    };
+  }
+
+  // If base64 or buffer provided, upload to Google Drive
+  if (att.base64Data || att.base64 || att.buffer) {
+    try {
+      let buffer;
+      if (att.buffer) {
+        buffer = Buffer.from(att.buffer);
+      } else {
+        const rawData = att.base64Data || att.base64;
+        const cleanBase64 = rawData.replace(/^data:[^;]+;base64,/, '');
+        buffer = Buffer.from(cleanBase64, 'base64');
+      }
+
+      fileSize = buffer.length;
+
+      const driveRes = await googleDriveService.uploadFileToDrive({
+        buffer,
+        fileName,
+        mimeType: fileType,
+        folderType: 'Tasks',
+      });
+
+      driveFileId = driveRes.driveFileId;
+      driveUrl = driveRes.driveUrl;
+      fileUrl = `/api/files/drive/${driveFileId}`;
+    } catch (err) {
+      console.error('[taskController] Drive upload error, using local fallback:', err.message);
+      // Fallback local file write if Drive API fails
+      try {
+        const uploadsDir = path.join(__dirname, '../../uploads/tasks');
+        if (!fs.existsSync(uploadsDir)) {
+          fs.mkdirSync(uploadsDir, { recursive: true });
+        }
+        const ext = path.extname(fileName) || '';
+        const safeName = `task_${Date.now()}_${Math.random().toString(36).substring(2, 7)}${ext}`;
+        const filePath = path.join(uploadsDir, safeName);
+        const rawData = att.base64Data || att.base64;
+        const cleanBase64 = rawData.replace(/^data:[^;]+;base64,/, '');
+        fs.writeFileSync(filePath, Buffer.from(cleanBase64, 'base64'));
+        fileUrl = `uploads/tasks/${safeName}`;
+      } catch (localErr) {
+        console.error('Failed to write local task attachment fallback:', localErr);
+      }
+    }
+  }
+
+  return {
+    fileName: fileName,
+    originalName: att.originalName || fileName,
+    name: fileName,
+    driveFileId: driveFileId,
+    driveUrl: driveUrl,
+    fileUrl: fileUrl,
+    url: fileUrl,
+    fileType: fileType,
+    mimeType: fileType,
+    fileSize: fileSize,
+    folderType: 'Tasks',
+    uploadedBy: userId,
+    uploadedByName: userName,
+    uploadedAt: new Date(),
+  };
+};
+
 // Helper: Recalculate project progress & task counts
 const recalculateProjectProgress = async (projectId) => {
+  if (!projectId) return null;
   try {
     const tasks = await Task.find({ projectId });
     if (!tasks || tasks.length === 0) return;
@@ -66,23 +165,14 @@ exports.getTasks = async (req, res, next) => {
 
     const filter = {};
     if (projectId) filter.projectId = projectId;
-    if (status && status !== 'All') filter.status = status;
+    if (status && status !== 'All') {
+      if (status === 'Pending') filter.status = 'To Do';
+      else filter.status = status;
+    }
 
     if (!isAdmin) {
-      // If employee specifies projectId, check if they are part of that project
-      if (projectId) {
-        const project = await Project.findById(projectId);
-        const isAssignedToProject =
-          project &&
-          (project.assignedTeam.some((m) => m.userId.toString() === req.user._id.toString()) ||
-            project.projectManager?.userId?.toString() === req.user._id.toString());
-        if (!isAssignedToProject) {
-          return res.status(403).json({ success: false, message: 'Access denied to this project tasks.' });
-        }
-      } else {
-        // If no projectId, employee only sees their own assigned tasks
-        filter.assignedTo = req.user._id;
-      }
+      // Employees ONLY see their own assigned tasks
+      filter.assignedTo = req.user._id;
     } else if (assignedTo) {
       filter.assignedTo = assignedTo;
     }
@@ -106,15 +196,7 @@ exports.getTask = async (req, res, next) => {
 
     const isAdmin = req.user.role === 'ADMIN';
     if (!isAdmin && task.assignedTo.toString() !== req.user._id.toString()) {
-      // Also allow if user is on the project team
-      const project = await Project.findById(task.projectId);
-      const isAssigned =
-        project &&
-        (project.assignedTeam.some((m) => m.userId.toString() === req.user._id.toString()) ||
-          project.projectManager?.userId?.toString() === req.user._id.toString());
-      if (!isAssigned) {
-        return res.status(403).json({ success: false, message: 'Access denied to this task.' });
-      }
+      return res.status(403).json({ success: false, message: 'Access denied to this task.' });
     }
 
     res.status(200).json({ success: true, data: task });
@@ -129,18 +211,24 @@ exports.getTask = async (req, res, next) => {
  */
 exports.createTask = async (req, res, next) => {
   try {
-    const { projectId, name, description, assignedTo, priority, startDate, dueDate } = req.body;
+    console.log('[createTask] req.body:', req.body, 'req.files:', req.files ? req.files.length : 0);
+    const { projectId, name, title, description, assignedTo, priority, startDate, dueDate, attachments } = req.body;
 
-    const project = await Project.findById(projectId);
-    if (!project) {
-      return res.status(404).json({ success: false, message: 'Project not found' });
+    const taskTitle = name || title;
+    if (!taskTitle || !assignedTo) {
+      return res.status(400).json({ success: false, message: 'Task title and assigned employee are required.' });
+    }
+
+    let project = null;
+    if (projectId) {
+      project = await Project.findById(projectId);
     }
 
     const isAdmin = req.user.role === 'ADMIN';
-    const isPM = project.projectManager?.userId?.toString() === req.user._id.toString();
+    const isPM = project && project.projectManager?.userId?.toString() === req.user._id.toString();
 
-    if (!isAdmin && !isPM) {
-      return res.status(403).json({ success: false, message: 'Only Admins or Project Managers can create tasks.' });
+    if (!isAdmin && project && !isPM) {
+      return res.status(403).json({ success: false, message: 'Only Admins or Project Managers can create tasks for this project.' });
     }
 
     const assignee = await User.findById(assignedTo);
@@ -148,15 +236,48 @@ exports.createTask = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Assigned employee not found' });
     }
 
-    const count = await Task.countDocuments({ projectId });
-    const taskId = `TSK-${project.projectId.replace('PR-', '')}-${String(count + 1).padStart(3, '0')}`;
+    let taskId = '';
+    if (project) {
+      const count = await Task.countDocuments({ projectId: project._id });
+      taskId = `TSK-${(project.projectId || 'PRJ').replace('PR-', '')}-${String(count + 1).padStart(3, '0')}`;
+    } else {
+      const count = await Task.countDocuments({ projectId: null });
+      taskId = `TSK-GEN-${String(count + 1).padStart(3, '0')}`;
+    }
+
+    // Process attachment files (from req.files multipart upload or req.body.attachments)
+    const processedAttachments = [];
+
+    if (req.files && Array.isArray(req.files) && req.files.length > 0) {
+      for (const file of req.files) {
+        const saved = await saveAttachmentFile(
+          {
+            fileName: file.originalname,
+            originalName: file.originalname,
+            buffer: file.buffer,
+            fileType: file.mimetype,
+            fileSize: file.size,
+          },
+          req.user._id,
+          req.user.name
+        );
+        if (saved) processedAttachments.push(saved);
+      }
+    }
+
+    if (Array.isArray(attachments)) {
+      for (const att of attachments) {
+        const saved = await saveAttachmentFile(att, req.user._id, req.user.name);
+        if (saved) processedAttachments.push(saved);
+      }
+    }
 
     const task = await Task.create({
       taskId,
-      projectId: project._id,
-      projectName: project.name,
-      name,
-      description,
+      projectId: project ? project._id : null,
+      projectName: project ? project.name : 'General Operations',
+      name: taskTitle,
+      description: description || '',
       assignedTo: assignee._id,
       assignedToName: assignee.name,
       priority: priority || 'Medium',
@@ -164,11 +285,15 @@ exports.createTask = async (req, res, next) => {
       dueDate: dueDate || '',
       status: 'To Do',
       progress: 0,
+      attachments: processedAttachments,
       createdBy: req.user._id,
     });
 
-    // Recalculate project stats
-    const updatedProject = await recalculateProjectProgress(project._id);
+    // Recalculate project stats if associated with a project
+    let updatedProject = null;
+    if (project) {
+      updatedProject = await recalculateProjectProgress(project._id);
+    }
 
     // Audit log
     await AuditLog.create({
@@ -176,8 +301,8 @@ exports.createTask = async (req, res, next) => {
       userName: req.user.name,
       userRole: req.user.role,
       action: 'TASK_CREATED',
-      projectId: project._id,
-      projectName: project.name,
+      projectId: project ? project._id : null,
+      projectName: project ? project.name : 'General Operations',
       description: `Task "${task.name}" created and assigned to ${assignee.name}`,
     });
 
@@ -187,13 +312,15 @@ exports.createTask = async (req, res, next) => {
       senderId: req.user._id,
       senderName: req.user.name,
       title: 'New Task Assigned',
-      message: `You were assigned task "${task.name}" in project "${project.name}"`,
+      message: `You were assigned task "${task.name}" ${project ? `in project "${project.name}"` : ''}`,
       type: 'TASK',
       linkId: task._id.toString(),
     });
 
     emitSocket(req, 'task:created', task);
-    emitSocket(req, 'project:updated', updatedProject || project);
+    if (updatedProject) {
+      emitSocket(req, 'project:updated', updatedProject);
+    }
 
     res.status(201).json({ success: true, data: task });
   } catch (error) {
@@ -222,7 +349,7 @@ exports.updateTaskProgress = async (req, res, next) => {
       });
     }
 
-    const { progress, status, comment, attachment } = req.body;
+    const { progress, status, comment, attachment, attachments } = req.body;
     const oldProgress = task.progress;
     const oldStatus = task.status;
 
@@ -236,8 +363,10 @@ exports.updateTaskProgress = async (req, res, next) => {
     }
 
     if (status !== undefined) {
-      task.status = status;
-      if (status === 'Completed' && task.progress < 100) {
+      let mappedStatus = status;
+      if (status === 'Pending') mappedStatus = 'To Do';
+      task.status = mappedStatus;
+      if (mappedStatus === 'Completed' && task.progress < 100) {
         task.progress = 100;
       }
     }
@@ -251,20 +380,42 @@ exports.updateTaskProgress = async (req, res, next) => {
       });
     }
 
-    if (attachment && attachment.url) {
-      task.attachments.push({
-        name: attachment.name || 'Attachment',
-        url: attachment.url,
-        uploadedBy: req.user._id,
-        uploadedByName: req.user.name,
-        uploadedAt: new Date(),
-      });
+    if (req.files && Array.isArray(req.files) && req.files.length > 0) {
+      for (const file of req.files) {
+        const saved = await saveAttachmentFile(
+          {
+            fileName: file.originalname,
+            originalName: file.originalname,
+            buffer: file.buffer,
+            fileType: file.mimetype,
+            fileSize: file.size,
+          },
+          req.user._id,
+          req.user.name
+        );
+        if (saved) task.attachments.push(saved);
+      }
+    }
+
+    if (attachment) {
+      const saved = await saveAttachmentFile(attachment, req.user._id, req.user.name);
+      if (saved) task.attachments.push(saved);
+    }
+
+    if (Array.isArray(attachments)) {
+      for (const att of attachments) {
+        const saved = await saveAttachmentFile(att, req.user._id, req.user.name);
+        if (saved) task.attachments.push(saved);
+      }
     }
 
     await task.save();
 
-    // Recalculate parent project's overall progress
-    const updatedProject = await recalculateProjectProgress(task.projectId);
+    // Recalculate parent project's overall progress if linked
+    let updatedProject = null;
+    if (task.projectId) {
+      updatedProject = await recalculateProjectProgress(task.projectId);
+    }
 
     // Audit log
     await AuditLog.create({

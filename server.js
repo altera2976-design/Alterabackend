@@ -3,11 +3,14 @@ const http = require("http");
 const { Server } = require("socket.io");
 const app = require("./app");
 const connectDB = require("./src/config/db");
+const googleDriveService = require("./src/services/googleDrive.service");
 
 const PORT = process.env.PORT || 5001;
 
 const startServer = async () => {
   await connectDB();
+  await googleDriveService.initializeFolderStructure();
+
 
   // Create HTTP server
   const server = http.createServer(app);

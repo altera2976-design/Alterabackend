@@ -51,4 +51,10 @@ router.delete('/:id', authorize('ADMIN'), employeeController.deleteEmployee);
 router.post('/:id/delete', authorize('ADMIN'), employeeController.deleteEmployee);
 router.put('/:id/delete', authorize('ADMIN'), employeeController.deleteEmployee);
 
+const upload = require('../middleware/upload');
+
+// Employee Documents routes
+router.get('/:id/documents', employeeController.getEmployeeDocuments);
+router.post('/:id/documents', upload.array('files', 10), employeeController.uploadEmployeeDocument);
+
 module.exports = router;

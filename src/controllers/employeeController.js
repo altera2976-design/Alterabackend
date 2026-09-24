@@ -55,11 +55,50 @@ exports.createEmployee = async (req, res, next) => {
     const { name, email, password, phone, role, department, designation, joiningDate, salary, workingHours, isAdminPanelEnabled, permissions } = req.body;
 
     const targetEmail = (email || '').toLowerCase().trim();
-    const existingUser = await User.findOne({ email: targetEmail });
+    const inputEmpId = req.body.employeeId ? req.body.employeeId.trim().toUpperCase() : null;
+
+    const existingUser = await User.findOne({
+      $or: [
+        { email: targetEmail },
+        ...(inputEmpId ? [{ employeeId: inputEmpId }] : []),
+      ],
+    });
+
     if (existingUser) {
+      if (req.body.isUpdate === true || req.body.updateExisting === true) {
+        if (role && ALLOWED_ROLES.includes(role.toUpperCase())) {
+          existingUser.role = role.toUpperCase();
+        }
+        if (name) existingUser.name = name.trim();
+        if (phone) existingUser.phone = phone.trim();
+        if (department !== undefined) existingUser.department = department;
+        if (designation !== undefined) existingUser.designation = designation;
+        if (salary !== undefined) existingUser.salary = Number(salary);
+        if (workingHours !== undefined) existingUser.workingHours = Number(workingHours);
+        if (joiningDate) existingUser.joiningDate = joiningDate;
+        if (isAdminPanelEnabled !== undefined) existingUser.isAdminPanelEnabled = Boolean(isAdminPanelEnabled);
+        if (permissions) existingUser.permissions = { ...existingUser.permissions, ...permissions };
+        if (password) existingUser.password = password;
+
+        await existingUser.save();
+
+        const io = req.app.get('io');
+        if (io) {
+          io.emit('employee_updated', { type: 'UPDATED', employee: existingUser });
+          io.emit('dashboard_updated', { type: 'EMPLOYEE_UPDATED' });
+        }
+
+        return res.status(200).json({
+          success: true,
+          message: `Employee ${existingUser.employeeId || targetEmail} updated successfully.`,
+          employee: existingUser,
+        });
+      }
+
+      const dupId = existingUser.employeeId || inputEmpId || targetEmail;
       return res.status(409).json({
         success: false,
-        message: `An account with email '${targetEmail}' already exists (Current Role: ${existingUser.role}). You can update their role from the table.`
+        message: `Employee ID ${dupId} is already registered.`
       });
     }
 
@@ -73,9 +112,8 @@ exports.createEmployee = async (req, res, next) => {
       });
     }
 
-
-    // Auto-generate unique employee ID
-    const employeeId = await generateEmployeeId();
+    // Auto-generate unique employee ID if not provided
+    const employeeId = inputEmpId || await generateEmployeeId();
 
     const userRole = role && ALLOWED_ROLES.includes(role.toUpperCase()) ? role.toUpperCase() : 'EMPLOYEE';
 
@@ -330,4 +368,136 @@ exports.deleteEmployee = async (req, res, next) => {
     next(error);
   }
 };
+
+/**
+ * POST /api/employees/:id/documents
+ * Upload an HR/Employee document to Google Drive (Employee Documents folder)
+ */
+exports.uploadEmployeeDocument = async (req, res, next) => {
+  try {
+    const targetUserId = req.params.id;
+    const isAdmin = req.user.role === 'ADMIN' || req.user.role === 'SUPER_ADMIN';
+    const isSelf = req.user._id.toString() === targetUserId;
+
+    if (!isAdmin && !isSelf) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied: You are not authorized to upload documents for another employee.',
+      });
+    }
+
+    const user = await User.findById(targetUserId);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'Employee not found.' });
+    }
+
+    const googleDriveService = require('../services/googleDrive.service');
+    const documentType = req.body.documentType || 'General Document';
+    const uploadedDocs = [];
+
+    // Process uploaded files (Multer memory files or base64)
+    if (req.files && req.files.length > 0) {
+      for (const file of req.files) {
+        const driveRes = await googleDriveService.uploadFileToDrive({
+          buffer: file.buffer,
+          fileName: file.originalname,
+          mimeType: file.mimetype,
+          folderType: 'Employee Documents',
+        });
+
+        const docRecord = {
+          documentType,
+          fileName: driveRes.fileName,
+          originalName: file.originalname,
+          driveFileId: driveRes.driveFileId,
+          driveUrl: driveRes.driveUrl,
+          fileUrl: `/api/files/drive/${driveRes.driveFileId}`,
+          fileType: driveRes.mimeType,
+          fileSize: driveRes.fileSize,
+          folderType: 'Employee Documents',
+          uploadedBy: req.user._id,
+          uploadedAt: new Date(),
+        };
+
+        user.documents.push(docRecord);
+        uploadedDocs.push(docRecord);
+      }
+    } else if (req.body.base64Data || req.body.base64) {
+      const fileName = req.body.fileName || `doc_${Date.now()}.pdf`;
+      const mimeType = req.body.mimeType || 'application/pdf';
+      const cleanBase64 = (req.body.base64Data || req.body.base64).replace(/^data:[^;]+;base64,/, '');
+      const buffer = Buffer.from(cleanBase64, 'base64');
+
+      const driveRes = await googleDriveService.uploadFileToDrive({
+        buffer,
+        fileName,
+        mimeType,
+        folderType: 'Employee Documents',
+      });
+
+      const docRecord = {
+        documentType,
+        fileName: driveRes.fileName,
+        originalName: fileName,
+        driveFileId: driveRes.driveFileId,
+        driveUrl: driveRes.driveUrl,
+        fileUrl: `/api/files/drive/${driveRes.driveFileId}`,
+        fileType: driveRes.mimeType,
+        fileSize: driveRes.fileSize,
+        folderType: 'Employee Documents',
+        uploadedBy: req.user._id,
+        uploadedAt: new Date(),
+      };
+
+      user.documents.push(docRecord);
+      uploadedDocs.push(docRecord);
+    } else {
+      return res.status(400).json({ success: false, message: 'No document file provided for upload.' });
+    }
+
+    await user.save();
+
+    res.status(201).json({
+      success: true,
+      message: 'Employee document uploaded successfully.',
+      documents: uploadedDocs,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/employees/:id/documents
+ * List documents for specified employee (Strict authorization check)
+ */
+exports.getEmployeeDocuments = async (req, res, next) => {
+  try {
+    const targetUserId = req.params.id;
+    const isAdmin = req.user.role === 'ADMIN' || req.user.role === 'SUPER_ADMIN';
+    const isSelf = req.user._id.toString() === targetUserId;
+
+    if (!isAdmin && !isSelf) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied: You cannot access documents belonging to another employee.',
+      });
+    }
+
+    const user = await User.findById(targetUserId).select('documents name employeeId');
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'Employee not found.' });
+    }
+
+    res.status(200).json({
+      success: true,
+      employeeId: user.employeeId,
+      name: user.name,
+      documents: user.documents || [],
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 

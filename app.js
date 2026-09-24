@@ -57,14 +57,15 @@ app.use(
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // ── Body parsers ─────────────────────────────────────────────────────────────
-// Allow 10mb for image upload endpoints, default 100kb for standard JSON API requests
+// Allow 25mb for image and document upload endpoints, default 100kb for standard JSON API requests
 app.use((req, res, next) => {
-  if (req.path.includes("profile-image") || req.path.includes("upload") || req.path.includes("attendance")) {
-    return express.json({ limit: "10mb" })(req, res, next);
+  if (req.path.includes("profile-image") || req.path.includes("upload") || req.path.includes("attendance") || req.path.includes("tasks") || req.path.includes("files")) {
+    return express.json({ limit: "25mb" })(req, res, next);
   }
   return express.json({ limit: "100kb" })(req, res, next);
 });
-app.use(express.urlencoded({ extended: true, limit: "100kb" }));
+app.use(express.urlencoded({ extended: true, limit: "25mb" }));
+
 
 // ── Global rate limiting (backstop — specific limits applied per-route) ───────
 app.use(generalLimiter);
@@ -105,6 +106,8 @@ app.use("/api/crm", require("./src/routes/crmRoutes"));
 app.use("/api/finance", require("./src/routes/financeRoutes"));
 app.use("/api/transactions", require("./src/routes/transactionRoutes"));
 app.use("/api/execution", require("./src/routes/projectExecutionRoutes"));
+app.use("/api/files", require("./src/routes/fileRoutes"));
+
 
 // ── 404 handler ──────────────────────────────────────────────────────────────
 app.use((req, res) => {

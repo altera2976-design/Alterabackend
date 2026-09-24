@@ -100,6 +100,20 @@ const LeadSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Project',
     },
+    attachments: [
+      {
+        fileName: { type: String },
+        originalName: { type: String },
+        driveFileId: { type: String },
+        driveUrl: { type: String },
+        fileUrl: { type: String },
+        fileType: { type: String },
+        fileSize: { type: Number },
+        folderType: { type: String, default: 'CRM Files' },
+        uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        uploadedAt: { type: Date, default: Date.now },
+      },
+    ],
   },
   {
     timestamps: true,

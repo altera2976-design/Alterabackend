@@ -11,7 +11,7 @@ const TaskSchema = new mongoose.Schema(
     projectId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Project',
-      required: true,
+      required: false,
       index: true,
     },
     projectName: {
@@ -73,8 +73,17 @@ const TaskSchema = new mongoose.Schema(
     ],
     attachments: [
       {
-        name: { type: String, required: true },
-        url: { type: String, required: true },
+        fileName: { type: String },
+        originalName: { type: String },
+        driveFileId: { type: String },
+        driveUrl: { type: String },
+        fileUrl: { type: String },
+        fileType: { type: String },
+        mimeType: { type: String },
+        fileSize: { type: Number },
+        folderType: { type: String, default: 'Tasks' },
+        name: { type: String },
+        url: { type: String },
         uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
         uploadedByName: { type: String, default: '' },
         uploadedAt: { type: Date, default: Date.now },

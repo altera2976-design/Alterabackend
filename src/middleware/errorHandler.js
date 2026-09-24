@@ -9,17 +9,32 @@ const errorHandler = (err, req, res, next) => {
   // Log error internally
   console.error("❌ Server Error:", err.message || err);
 
+  // Express body-parser or Multer 413 Payload Too Large Error
+  if (err.type === 'entity.too.large' || err.status === 413 || err.statusCode === 413 || err.code === 'LIMIT_FILE_SIZE' || err.code === 'LIMIT_FILE_COUNT') {
+    statusCode = 413;
+    message = err.code === 'LIMIT_FILE_COUNT'
+      ? "Maximum 10 files allowed per task upload."
+      : "Payload too large. Maximum file upload size is 50MB per file.";
+  }
+
   // Mongoose CastError (invalid ObjectId)
   if (err.name === "CastError") {
     statusCode = 400;
     message = "Invalid request identifier.";
   }
 
-  // Mongoose duplicate key error
+  // Mongoose duplicate key error (E11000)
   if (err.code === 11000) {
-    statusCode = 400;
+    statusCode = 409;
     const field = err.keyValue ? Object.keys(err.keyValue)[0] : "field";
-    message = `${field.charAt(0).toUpperCase() + field.slice(1)} is already in use.`;
+    const value = err.keyValue ? err.keyValue[field] : "";
+    if (field === "employeeId") {
+      message = `Employee ID ${value} is already registered.`;
+    } else if (field === "email") {
+      message = `Email '${value}' is already registered.`;
+    } else {
+      message = `${field.charAt(0).toUpperCase() + field.slice(1)} '${value}' is already in use.`;
+    }
   }
 
   // Mongoose validation errors

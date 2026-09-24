@@ -16,9 +16,11 @@
     "express-rate-limit": "^8.7.0",
     "express-validator": "^7.1.0",
     "google-auth-library": "^11.0.2",
+    "googleapis": "^181.0.0",
     "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^8.4.1",
+    "multer": "^2.4.0",
     "nodemailer": "^10.0.10",
     "socket.io": "^4.8.3",
     "uuid": "^10.0.0"

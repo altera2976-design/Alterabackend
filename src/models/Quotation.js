@@ -223,6 +223,28 @@ const QuotationSchema = new mongoose.Schema(
       unique: true,
       sparse: true,
     },
+    pdfUrl: {
+      type: String,
+      default: '',
+    },
+    pdfDriveFileId: {
+      type: String,
+      default: '',
+    },
+    attachments: [
+      {
+        fileName: { type: String },
+        originalName: { type: String },
+        driveFileId: { type: String },
+        driveUrl: { type: String },
+        fileUrl: { type: String },
+        fileType: { type: String },
+        fileSize: { type: Number },
+        folderType: { type: String, default: 'Quotations' },
+        uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        uploadedAt: { type: Date, default: Date.now },
+      },
+    ],
     clientApproval: {
       approved: { type: Boolean, default: false },
       approvedAt: { type: Date },
