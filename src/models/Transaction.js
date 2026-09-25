@@ -121,8 +121,13 @@ const TransactionSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['Pending', 'Completed', 'Failed', 'Cancelled', 'Refunded'],
-      default: 'Pending',
+      enum: [
+        'Pending', 'Completed', 'Failed', 'Cancelled', 'Refunded',
+        'PENDING', 'COMPLETED', 'FAILED', 'CANCELLED', 'REFUNDED',
+        'pending', 'completed', 'failed', 'cancelled', 'refunded',
+        'PAID', 'paid', 'Success', 'SUCCESS', 'success',
+      ],
+      default: 'Completed',
       index: true,
     },
     description: {
@@ -154,6 +159,31 @@ const TransactionSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+// Auto-normalize status to Title Case ('Completed', 'Pending', 'Failed', 'Cancelled', 'Refunded')
+TransactionSchema.pre('validate', function (next) {
+  if (this.status && typeof this.status === 'string') {
+    const s = this.status.trim().toUpperCase();
+    if (['COMPLETED', 'PAID', 'SUCCESS', 'SUCCESSFUL'].includes(s)) {
+      this.status = 'Completed';
+    } else if (['PENDING', 'UNPAID', 'PROCESSING', 'INITIATED'].includes(s)) {
+      this.status = 'Pending';
+    } else if (['FAILED', 'FAILURE', 'DECLINED', 'REJECTED'].includes(s)) {
+      this.status = 'Failed';
+    } else if (['CANCELLED', 'CANCELED', 'VOID'].includes(s)) {
+      this.status = 'Cancelled';
+    } else if (['REFUNDED', 'REFUND'].includes(s)) {
+      this.status = 'Refunded';
+    } else if (['Completed', 'Pending', 'Failed', 'Cancelled', 'Refunded'].includes(this.status.trim())) {
+      this.status = this.status.trim();
+    } else {
+      this.status = 'Completed';
+    }
+  } else {
+    this.status = 'Completed';
+  }
+  next();
+});
 
 // Compound indexes for optimization
 TransactionSchema.index({ status: 1, transactionDate: -1 });

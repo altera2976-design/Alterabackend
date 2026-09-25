@@ -26,7 +26,9 @@ router.get('/:id', checkPermission('quotation', 'view'), quotationController.get
 router.put('/:id', checkPermission('quotation', 'edit'), quotationController.updateQuotation);
 router.delete('/:id', checkPermission('quotation', 'delete'), quotationController.deleteQuotation);
 
-// Quotation specific actions
+// Quotation specific actions & transactions
+router.get('/:id/transactions', checkPermission('quotation', 'view'), quotationController.getQuotationTransactions);
+router.post('/:id/transactions', checkPermission('quotation', 'edit'), quotationController.addQuotationTransaction);
 router.post('/:id/send', checkPermission('quotation', 'edit'), quotationController.sendQuotation);
 router.post('/:id/convert-to-project', checkPermission('quotation', 'edit'), quotationController.convertToProject);
 

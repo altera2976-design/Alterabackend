@@ -365,6 +365,41 @@ async function convertQuotationToProject(quotation, user) {
   return { project, client: clientDoc };
 }
 
+/**
+ * Calculates payment summary (totalAmount, paidAmount, remainingAmount, paymentStatus)
+ * for a quotation from associated Transaction records
+ */
+async function getQuotationPaymentDetails(quotationId, grandTotal = 0) {
+  const Transaction = require('../models/Transaction');
+  const transactions = await Transaction.find({ quotationId })
+    .sort({ transactionDate: -1, createdAt: -1 })
+    .lean();
+
+  const totalAmount = Number(grandTotal) || 0;
+  const paidAmount = transactions
+    .filter((t) => ['Completed', 'Success', 'Paid'].includes(t.status))
+    .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+
+  const remainingAmount = Math.max(0, totalAmount - paidAmount);
+
+  let paymentStatus = 'UNPAID';
+  if (paidAmount >= totalAmount && totalAmount > 0) {
+    paymentStatus = 'PAID';
+  } else if (paidAmount > 0) {
+    paymentStatus = 'PARTIALLY_PAID';
+  }
+
+  return {
+    paymentSummary: {
+      totalAmount,
+      paidAmount,
+      remainingAmount,
+      paymentStatus,
+    },
+    transactions,
+  };
+}
+
 module.exports = {
   DEFAULT_TERMS,
   DEFAULT_MILESTONES,
@@ -377,4 +412,5 @@ module.exports = {
   calculateQuotationPricing,
   generatePublicToken,
   convertQuotationToProject,
+  getQuotationPaymentDetails,
 };

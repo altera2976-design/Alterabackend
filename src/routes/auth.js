@@ -66,6 +66,9 @@ router.put('/profile', protect, authController.updateProfile);
 // POST /api/auth/profile-image (protected)
 router.post('/profile-image', protect, authController.uploadProfileImage);
 
+// POST /api/auth/change-password (protected)
+router.post('/change-password', protect, authController.changePassword);
+
 // POST /api/auth/forgot-password (public, rate-limited)
 router.post(
   '/forgot-password',

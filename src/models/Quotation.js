@@ -188,6 +188,16 @@ const QuotationSchema = new mongoose.Schema(
       grandTotal: { type: Number, default: 0 },
       amountInWords: { type: String, default: '' },
     },
+    paymentSummary: {
+      totalAmount: { type: Number, default: 0 },
+      paidAmount: { type: Number, default: 0 },
+      remainingAmount: { type: Number, default: 0 },
+      paymentStatus: {
+        type: String,
+        enum: ['UNPAID', 'PARTIALLY_PAID', 'PAID'],
+        default: 'UNPAID',
+      },
+    },
     paymentMilestones: [
       {
         milestoneName: { type: String, required: true },

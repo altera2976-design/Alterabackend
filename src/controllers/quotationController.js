@@ -153,6 +153,48 @@ exports.createQuotation = async (req, res, next) => {
 };
 
 /**
+ * Helper to calculate Quotation Payment Summary from Transaction model
+ */
+async function getQuotationPaymentDetails(quotationId, grandTotal = 0) {
+  const Transaction = require('../models/Transaction');
+  const transactions = await Transaction.find({ quotationId })
+    .sort({ transactionDate: -1, createdAt: -1 })
+    .lean();
+
+  let paidAmount = 0;
+  transactions.forEach((tx) => {
+    if (tx.status === 'Completed' || tx.status === 'PAID' || tx.status === 'COMPLETED') {
+      if (tx.transactionType === 'Refund') {
+        paidAmount -= Number(tx.amount || 0);
+      } else {
+        paidAmount += Number(tx.amount || 0);
+      }
+    }
+  });
+
+  if (paidAmount < 0) paidAmount = 0;
+  const totalAmount = Number(grandTotal || 0);
+  const remainingAmount = Math.max(0, totalAmount - paidAmount);
+
+  let paymentStatus = 'UNPAID';
+  if (paidAmount >= totalAmount && totalAmount > 0) {
+    paymentStatus = 'PAID';
+  } else if (paidAmount > 0) {
+    paymentStatus = 'PARTIALLY_PAID';
+  }
+
+  return {
+    paymentSummary: {
+      totalAmount,
+      paidAmount,
+      remainingAmount,
+      paymentStatus,
+    },
+    transactions,
+  };
+}
+
+/**
  * GET /api/quotations
  * Query quotations with search, filters, pagination
  */
@@ -241,13 +283,61 @@ exports.getQuotations = async (req, res, next) => {
       Quotation.countDocuments(query),
     ]);
 
+    // Aggregate paid amounts for transactions associated with these quotations
+    const quotationIds = quotations.map((q) => q._id);
+    const Transaction = require('../models/Transaction');
+    const paidSummaryAgg = await Transaction.aggregate([
+      {
+        $match: {
+          quotationId: { $in: quotationIds },
+          status: { $in: ['Completed', 'PAID', 'COMPLETED'] },
+        },
+      },
+      {
+        $group: {
+          _id: '$quotationId',
+          totalPaid: {
+            $sum: {
+              $cond: [{ $eq: ['$transactionType', 'Refund'] }, { $multiply: ['$amount', -1] }, '$amount'],
+            },
+          },
+        },
+      },
+    ]);
+
+    const paidMap = {};
+    paidSummaryAgg.forEach((item) => {
+      paidMap[item._id.toString()] = Math.max(0, item.totalPaid || 0);
+    });
+
+    const enrichedQuotations = quotations.map((q) => {
+      const grandTotal = q.pricing?.grandTotal || 0;
+      const paidAmount = paidMap[q._id.toString()] || 0;
+      const remainingAmount = Math.max(0, grandTotal - paidAmount);
+      let paymentStatus = 'UNPAID';
+      if (paidAmount >= grandTotal && grandTotal > 0) {
+        paymentStatus = 'PAID';
+      } else if (paidAmount > 0) {
+        paymentStatus = 'PARTIALLY_PAID';
+      }
+      return {
+        ...q,
+        paymentSummary: {
+          totalAmount: grandTotal,
+          paidAmount,
+          remainingAmount,
+          paymentStatus,
+        },
+      };
+    });
+
     res.status(200).json({
       success: true,
-      count: quotations.length,
+      count: enrichedQuotations.length,
       totalCount,
       totalPages: Math.ceil(totalCount / limitNum),
       currentPage: pageNum,
-      quotations,
+      quotations: enrichedQuotations,
     });
   } catch (error) {
     next(error);
@@ -334,7 +424,7 @@ exports.getQuotationSummary = async (req, res, next) => {
 
 /**
  * GET /api/quotations/:id
- * Full quotation detail with items and revisions history
+ * Full quotation detail with items, payment summary, transactions, and revisions history
  */
 exports.getQuotationById = async (req, res, next) => {
   try {
@@ -361,10 +451,19 @@ exports.getQuotationById = async (req, res, next) => {
       .sort({ revision: -1 })
       .lean();
 
+    // Fetch transactions & payment summary
+    const { paymentSummary, transactions } = await getQuotationPaymentDetails(id, quotation.pricing?.grandTotal);
+
     res.status(200).json({
       success: true,
-      quotation,
+      quotation: {
+        ...quotation,
+        paymentSummary,
+        transactions,
+      },
       revisions,
+      paymentSummary,
+      transactions,
     });
   } catch (error) {
     next(error);
@@ -881,6 +980,144 @@ exports.updateConfig = async (req, res, next) => {
       success: true,
       message: 'Quotation settings updated successfully.',
       data: setting.value,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/quotations/:id/transactions
+ * Retrieve all transactions linked to a quotation along with calculated payment summary
+ */
+exports.getQuotationTransactions = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid quotation ID.' });
+    }
+
+    const quotation = await Quotation.findById(id).select('quotationNumber pricing.grandTotal client').lean();
+    if (!quotation) {
+      return res.status(404).json({ success: false, message: 'Quotation not found.' });
+    }
+
+    const { paymentSummary, transactions } = await getQuotationPaymentDetails(id, quotation.pricing?.grandTotal);
+
+    res.status(200).json({
+      success: true,
+      quotationNumber: quotation.quotationNumber,
+      paymentSummary,
+      transactions,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/quotations/:id/transactions
+ * Record a new payment/transaction against a quotation
+ */
+exports.addQuotationTransaction = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { amount, paymentMethod, referenceId, description, notes, status = 'Completed', transactionDate } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid quotation ID.' });
+    }
+
+    const quotation = await Quotation.findById(id);
+    if (!quotation) {
+      return res.status(404).json({ success: false, message: 'Quotation not found.' });
+    }
+
+    if (!amount || isNaN(amount) || Number(amount) <= 0) {
+      return res.status(400).json({ success: false, message: 'Valid transaction amount is required.' });
+    }
+
+    const { generateTransactionId } = require('../services/transactionService');
+    const Transaction = require('../models/Transaction');
+
+    // Duplicate transaction check via referenceId if provided
+    if (referenceId && referenceId.trim()) {
+      const existingRef = await Transaction.findOne({ referenceId: referenceId.trim() }).lean();
+      if (existingRef) {
+        return res.status(409).json({
+          success: false,
+          message: `Duplicate transaction. Reference ID ${referenceId} already exists as ${existingRef.transactionId}.`,
+        });
+      }
+    }
+
+    const transactionId = await generateTransactionId();
+
+    const newTransaction = new Transaction({
+      transactionId,
+      referenceId: referenceId ? referenceId.trim() : '',
+      quotationId: quotation._id,
+      customerId: quotation.clientId,
+      customerName: quotation.client?.name || '',
+      transactionType: 'Quotation Payment',
+      paymentMethod: paymentMethod || 'UPI',
+      amount: Number(amount),
+      currency: 'INR',
+      status: status || 'Completed',
+      description: description?.trim() || `Payment received for Quotation ${quotation.quotationNumber}`,
+      notes: notes?.trim() || '',
+      transactionDate: transactionDate ? new Date(transactionDate) : new Date(),
+      createdBy: req.user?._id,
+      createdByName: req.user?.name || 'System',
+      timeline: [
+        {
+          previousStatus: '',
+          newStatus: status || 'Completed',
+          changedBy: req.user?._id,
+          changedByName: req.user?.name || 'System',
+          changedAt: new Date(),
+          reason: 'Quotation transaction created.',
+        },
+      ],
+    });
+
+    await newTransaction.save();
+
+    // Log transaction entry in Quotation Audit Log
+    quotation.auditLog.push({
+      action: 'PAYMENT_RECEIVED',
+      performedBy: req.user?._id,
+      performedByName: req.user?.name || 'User',
+      timestamp: new Date(),
+      details: `Payment ${newTransaction.transactionId} of ${formatINR(amount)} received via ${newTransaction.paymentMethod}`,
+    });
+    const { paymentSummary, transactions } = await getQuotationPaymentDetails(quotation._id, quotation.pricing?.grandTotal);
+    quotation.paymentSummary = paymentSummary;
+    await quotation.save();
+
+    // Socket.io Real-time emit
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('quotation_transaction_created', {
+        quotationId: quotation._id,
+        quotationNumber: quotation.quotationNumber,
+        transaction: newTransaction,
+        paymentSummary,
+      });
+      io.emit('transaction_created', {
+        id: newTransaction._id,
+        transactionId: newTransaction.transactionId,
+        amount: newTransaction.amount,
+        status: newTransaction.status,
+      });
+    }
+
+    res.status(201).json({
+      success: true,
+      message: `Payment of ${formatINR(amount)} recorded for Quotation ${quotation.quotationNumber}.`,
+      data: newTransaction,
+      paymentSummary,
+      transactions,
     });
   } catch (error) {
     next(error);

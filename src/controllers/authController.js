@@ -46,17 +46,20 @@ exports.login = async (req, res, next) => {
         : "admin@alterainterior.com";
       if (!user) {
         try {
-          user = await User.create({
-            name: "Altera Super Admin",
-            email: targetEmail,
-            password: cleanPass || "Altera@2026",
-            role: "ADMIN",
-            status: "ACTIVE",
-            employeeId: "EMP001",
-            department: "Management",
-            designation: "Super Admin",
-          });
-          user = await User.findById(user._id).select("+password");
+          const initPass = process.env.ADMIN_PASSWORD || cleanPass;
+          if (initPass && initPass.length >= 6) {
+            user = await User.create({
+              name: "Altera Super Admin",
+              email: targetEmail,
+              password: initPass,
+              role: "SUPER_ADMIN",
+              status: "ACTIVE",
+              employeeId: "EMP001",
+              department: "Management",
+              designation: "Super Admin",
+            });
+            user = await User.findById(user._id).select("+password");
+          }
         } catch (err) {
           console.error("Error auto-creating admin user:", err);
         }
@@ -96,31 +99,8 @@ exports.login = async (req, res, next) => {
       });
     }
 
-    // 5. Compare password
-    let isMatch = await user.comparePassword(cleanPass);
-    if (
-      !isMatch &&
-      (isAdminEmail || user.role === "SUPER_ADMIN" || user.role === "ADMIN")
-    ) {
-      const lowerPass = cleanPass.toLowerCase();
-      if (
-        cleanPass === "Altera@2026" ||
-        lowerPass === "altera@2026" ||
-        lowerPass === "admin123" ||
-        lowerPass === "admin@123456" ||
-        lowerPass === "admin@123" ||
-        cleanPass === "Admin@123456"
-      ) {
-        isMatch = true;
-        try {
-          user.password = cleanPass;
-          await user.save();
-        } catch (e) {
-          console.warn("Could not update admin password hash:", e);
-        }
-      }
-    }
-
+    // 5. Compare password securely via bcrypt
+    const isMatch = await user.comparePassword(cleanPass);
     if (!isMatch) {
       return res
         .status(401)
@@ -715,6 +695,54 @@ exports.resetPassword = async (req, res, next) => {
     res.status(200).json({
       success: true,
       message: "Password reset successfully. You can now log in.",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/auth/change-password
+ * Protected — Change password for authenticated user / Super Admin
+ */
+exports.changePassword = async (req, res, next) => {
+  try {
+    const { currentPassword, newPassword, confirmPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Current password and new password are required." });
+    }
+
+    if (confirmPassword && newPassword !== confirmPassword) {
+      return res
+        .status(400)
+        .json({ success: false, message: "New password and confirm password do not match." });
+    }
+
+    if (newPassword.length < 6) {
+      return res
+        .status(400)
+        .json({ success: false, message: "New password must be at least 6 characters long." });
+    }
+
+    const user = await User.findById(req.user._id).select("+password");
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found." });
+    }
+
+    const isMatch = await user.comparePassword(currentPassword);
+    if (!isMatch) {
+      return res.status(401).json({ success: false, message: "Incorrect current password." });
+    }
+
+    user.password = newPassword;
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Password changed successfully.",
     });
   } catch (error) {
     next(error);
