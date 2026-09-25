@@ -21,8 +21,8 @@ const QuotationItemSchema = new mongoose.Schema(
     },
     unit: {
       type: String,
-      enum: ['Sq Ft', 'Sq M', 'Nos', 'Running Ft', 'Lump Sum', 'Hours', 'Days', 'Custom'],
       default: 'Sq Ft',
+      trim: true,
     },
     measurements: {
       length: { type: Number, default: 0 },
@@ -59,6 +59,7 @@ const QuotationItemSchema = new mongoose.Schema(
       {
         name: { type: String, required: true },
         qty: { type: Number, default: 1 },
+        unitPrice: { type: Number, default: 0 },
         inclusionType: {
           type: String,
           enum: ['INCLUDED', 'EXCLUDED', 'LUMP_SUM', 'ACTUAL_COST'],
@@ -212,20 +213,21 @@ const QuotationSchema = new mongoose.Schema(
       },
     ],
     bankDetails: {
-      accountName: { type: String, default: 'Altera Interior Pvt Ltd' },
-      bankName: { type: String, default: 'HDFC Bank' },
-      accountNumber: { type: String, default: '50200012345678' },
-      ifscCode: { type: String, default: 'HDFC0001234' },
-      branch: { type: String, default: 'Main Branch' },
-      upiId: { type: String, default: 'altera@hdfcbank' },
+      accountName: { type: String, default: 'Altera Interior' },
+      bankName: { type: String, default: 'IndusInd Bank Limited' },
+      accountNumber: { type: String, default: '201002880175' },
+      ifscCode: { type: String, default: 'INDB0000518' },
+      branch: { type: String, default: 'Sector-31, Gurgaon Branch' },
+      bankAddress: { type: String, default: 'SCO-8, Sector 31/32A HUDA Market, Gurgaon – 122 002, Haryana, India' },
+      upiId: { type: String, default: '' },
     },
     companyDetails: {
       name: { type: String, default: 'Altera Interior' },
       tagline: { type: String, default: 'The Modern Home Maker • Interior | Architect | Construction' },
-      address: { type: String, default: 'Plot 42, Sector 18, Commercial Hub' },
-      phone: { type: String, default: '+91 98765 43210' },
-      email: { type: String, default: 'contact@alterainterior.com' },
-      gstin: { type: String, default: '07AAAAA0000A1Z5' },
+      address: { type: String, default: 'Plot 16/2, Dhanwapur Villae,Behind Ats Triump Tower,Dwarka Expressway,Sec-104,Gurugram(HR)' },
+      phone: { type: String, default: '9718374407' },
+      email: { type: String, default: '[EMAIL_ADDRESS]' },
+      gstin: { type: String, default: '06CFEPS8731P1Z0' },
       logoUrl: { type: String, default: '' },
     },
     publicToken: {

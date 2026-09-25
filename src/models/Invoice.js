@@ -110,11 +110,13 @@ const InvoiceSchema = new mongoose.Schema(
       default: 'Thank you for your business. Please complete payment by due date.',
     },
     bankDetails: {
-      bankName: { type: String, default: 'HDFC Bank' },
-      accountName: { type: String, default: 'Interior Design Studio Pvt Ltd' },
-      accountNumber: { type: String, default: '50200012345678' },
-      ifscCode: { type: String, default: 'HDFC0001234' },
-      upiId: { type: String, default: 'interior@hdfcbank' },
+      bankName: { type: String, default: 'IndusInd Bank Limited' },
+      accountName: { type: String, default: 'Altera Interior' },
+      accountNumber: { type: String, default: '201002880175' },
+      ifscCode: { type: String, default: 'INDB0000518' },
+      branch: { type: String, default: 'Sector-31, Gurgaon Branch' },
+      bankAddress: { type: String, default: 'SCO-8, Sector 31/32A HUDA Market, Gurgaon – 122 002, Haryana, India' },
+      upiId: { type: String, default: '' },
     },
   },
   {

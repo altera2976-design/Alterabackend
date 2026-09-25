@@ -33,11 +33,16 @@ async function getTransporter() {
     try {
       await Promise.race([
         transporter.verify(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('SMTP connection timeout')), 4000)),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("SMTP connection timeout")), 4000),
+        ),
       ]);
       console.log("✅ SMTP Server is ready to send messages");
     } catch (error) {
-      console.warn("⚠️ SMTP Verification warning/timeout, fallback to mock transport:", error.message);
+      console.warn(
+        "⚠️ SMTP Verification warning/timeout, fallback to mock transport:",
+        error.message,
+      );
     }
 
     cachedTransporter = transporter;
@@ -48,7 +53,9 @@ async function getTransporter() {
   cachedTransporter = nodemailer.createTransport({
     jsonTransport: true,
   });
-  console.log("ℹ️ Development mailer initialized with instant mock JSON transport");
+  console.log(
+    "ℹ️ Development mailer initialized with instant mock JSON transport",
+  );
   return cachedTransporter;
 }
 
@@ -245,7 +252,7 @@ const sendPayslipEmail = async ({
 
       <hr style="border: none; border-top: 1px solid #eeeeee; margin: 24px 0 16px 0;" />
       <p style="font-size: 11px; color: #999999; text-align: center; margin: 0;">
-        © ${new Date().getFullYear()} Altera Interior Pvt. Ltd. All rights reserved. Generated automatically via Altera Payroll System.
+        © ${new Date().getFullYear()} Altera Interior. All rights reserved. Generated automatically via Altera Payroll System.
       </p>
     </div>
   `;
@@ -341,15 +348,16 @@ const sendQuotationEmail = async ({
         </div>
       </div>
 
-      ${publicUrl
-      ? `
+      ${
+        publicUrl
+          ? `
       <div style="text-align: center; margin: 25px 0;">
         <a href="${publicUrl}" style="background-color: #7A131A; color: #ffffff; padding: 12px 28px; text-decoration: none; border-radius: 6px; font-weight: 700; font-size: 14px; display: inline-block;">
           View &amp; Approve Quotation Online
         </a>
       </div>`
-      : ""
-    }
+          : ""
+      }
 
       <p style="font-size: 13px; color: #64748B; line-height: 1.5;">
         The detailed quotation document is attached to this email as a PDF. Feel free to review the room specifications, hardware selections, and milestones. If you require any design variations or clarifications, please reply to this email.
@@ -439,7 +447,7 @@ const sendPasswordResetOtp = async (to, otp) => {
   }
 };
 
-const { COMPANY_LOGO_DATA_URL } = require('../constants/companyLogo');
+const { COMPANY_LOGO_DATA_URL } = require("../constants/companyLogo");
 
 /**
  * Send Offer Letter Email to Candidate
@@ -519,7 +527,9 @@ const sendOfferLetterEmail = async ({
   try {
     const activeTransporter = await getTransporter();
     const info = await activeTransporter.sendMail(mailOptions);
-    console.log(`✅ Offer letter email sent to ${to}. MessageId: ${info.messageId}`);
+    console.log(
+      `✅ Offer letter email sent to ${to}. MessageId: ${info.messageId}`,
+    );
     return { success: true, messageId: info.messageId };
   } catch (error) {
     console.error("❌ Error sending offer letter email:", error);
@@ -536,4 +546,3 @@ module.exports = {
   sendPasswordResetOtp,
   getTransporter,
 };
-

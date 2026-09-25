@@ -130,7 +130,10 @@ const initializeFolderStructure = async () => {
     // 1. Root folder
     let rootFolderId = process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID;
     if (!rootFolderId) {
-      rootFolderId = await createDriveFolderIfNeeded('Altera Interior CRM');
+      rootFolderId = await createDriveFolderIfNeeded('Altera Interior CRM').catch((err) => {
+        console.warn('[GoogleDriveService] Unable to create root folder:', err.message);
+        return null;
+      });
       if (rootFolderId) process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID = rootFolderId;
     }
     initializedFolders.root = rootFolderId;
@@ -148,13 +151,16 @@ const initializeFolderStructure = async () => {
     for (const spec of folderSpecs) {
       let subFolderId = process.env[spec.envKey];
       if (!subFolderId && rootFolderId) {
-        subFolderId = await createDriveFolderIfNeeded(spec.name, rootFolderId);
+        subFolderId = await createDriveFolderIfNeeded(spec.name, rootFolderId).catch((err) => {
+          console.warn(`[GoogleDriveService] Unable to create ${spec.name} folder:`, err.message);
+          return null;
+        });
         if (subFolderId) process.env[spec.envKey] = subFolderId;
       }
       initializedFolders[spec.key] = subFolderId;
     }
 
-    console.log('[GoogleDriveService] Folder structure initialized successfully:', initializedFolders);
+    console.log('[GoogleDriveService] Folder structure initialized:', initializedFolders);
     return initializedFolders;
   } catch (error) {
     console.error('[GoogleDriveService] Error initializing folder structure:', error.message);

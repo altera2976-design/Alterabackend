@@ -50,20 +50,21 @@ const DEFAULT_ROOM_CATEGORIES = [
 const DEFAULT_COMPANY_DETAILS = {
   name: 'Altera Interior',
   tagline: 'The Modern Home Maker • Interior | Architect | Construction',
-  address: 'Plot 42, Sector 18, Commercial Hub, New Delhi - 110001',
-  phone: '+91 98765 43210',
-  email: 'contact@alterainterior.com',
-  gstin: '07AAAAA0000A1Z5',
+  address: 'Plot 16/2, Dhanwapur Village, Behind ATS Triumph Tower, Dwarka Expressway, Sec-104, Gurugram (HR)',
+  phone: '+91 9718374407',
+  email: 'info@alterainterior.com',
+  gstin: '06CFEPS8731P1Z0',
   logoUrl: '',
 };
 
 const DEFAULT_BANK_DETAILS = {
-  accountName: 'Altera Interior Pvt. Ltd.',
-  bankName: 'HDFC Bank Ltd.',
-  accountNumber: '50200012345678',
-  ifscCode: 'HDFC0001234',
-  branch: 'Sector 18 Commercial Branch',
-  upiId: 'altera@hdfcbank',
+  accountName: 'Altera Interior',
+  bankName: 'IndusInd Bank Limited',
+  accountNumber: '201002880175',
+  ifscCode: 'INDB0000518',
+  branch: 'Sector-31, Gurgaon Branch',
+  bankAddress: 'SCO-8, Sector 31/32A HUDA Market, Gurgaon – 122 002, Haryana, India',
+  upiId: '',
 };
 
 /**
@@ -164,7 +165,35 @@ async function getQuotationConfig() {
       },
       description: 'Interior quotation templates, company metadata, bank details, and room categories',
     });
+  } else {
+    setting.value.companyDetails = DEFAULT_COMPANY_DETAILS;
+    setting.value.bankDetails = DEFAULT_BANK_DETAILS;
+    setting.markModified('value');
+    await setting.save();
   }
+
+  // Database sync: Update any existing Quotations in MongoDB containing old placeholder address or GSTIN
+  try {
+    await Quotation.updateMany(
+      {
+        $or: [
+          { 'companyDetails.address': { $regex: /Plot 42|New Delhi/i } },
+          { 'companyDetails.gstin': { $regex: /07AAAAA/i } },
+          { 'companyDetails.email': { $regex: /EMAIL_ADDRESS|contact@alterainterior.com/i } },
+          { companyDetails: { $exists: false } },
+        ],
+      },
+      {
+        $set: {
+          companyDetails: DEFAULT_COMPANY_DETAILS,
+          bankDetails: DEFAULT_BANK_DETAILS,
+        },
+      }
+    );
+  } catch (err) {
+    console.error('Error migrating existing quotation company details:', err);
+  }
+
   return setting.value;
 }
 
@@ -185,16 +214,41 @@ function calculateQuotationPricing(items = [], pricingOptions = {}, milestones =
       calculatedArea = Math.round(length * (height || width) * 100) / 100;
     }
 
-    // Use calculated area if quantity not explicitly manually modified or default
     const qty = Number(item.quantity) > 0 ? Number(item.quantity) : calculatedArea > 0 ? calculatedArea : 1;
     const rate = Number(item.rate) || 0;
-    const itemAmount = Math.round(qty * rate);
+    
+    let accTotal = 0;
+    const processedAccessories = Array.isArray(item.accessories)
+      ? item.accessories.map((acc) => {
+          const accQty = Number(acc.qty) || 1;
+          const accUnitPrice = Number(acc.unitPrice) || (acc.cost ? Math.round(acc.cost / accQty) : 0);
+          const accCost = acc.cost !== undefined && acc.cost > 0 ? Number(acc.cost) : Math.round(accQty * accUnitPrice);
+          if (!acc.name || !item.name || acc.name.trim().toLowerCase() !== item.name.trim().toLowerCase()) {
+            accTotal += accCost;
+          }
+          return {
+            ...acc,
+            qty: accQty,
+            unitPrice: accUnitPrice,
+            cost: accCost,
+            inclusionType: acc.inclusionType || 'INCLUDED',
+          };
+        })
+      : [];
+
+    const baseAmount = Math.round(qty * rate);
+    const expectedAmount = baseAmount + accTotal;
+    const itemAmount = (item.amount !== undefined && Number(item.amount) > expectedAmount) ? Number(item.amount) : expectedAmount;
 
     rawSubtotal += itemAmount;
+
+    const rawUnit = item.unit ? String(item.unit).trim().toLowerCase() : '';
+    const unit = ['pieces', 'piece', 'pcs', 'pc'].includes(rawUnit) ? 'Pcs' : (item.unit || 'Sq Ft');
 
     return {
       ...item,
       itemNumber: item.itemNumber || idx + 1,
+      unit,
       measurements: {
         length,
         width,
@@ -203,6 +257,7 @@ function calculateQuotationPricing(items = [], pricingOptions = {}, milestones =
       },
       quantity: qty,
       rate,
+      accessories: processedAccessories,
       amount: itemAmount,
     };
   });
