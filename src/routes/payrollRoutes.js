@@ -1,24 +1,23 @@
 const express = require('express');
 const router = express.Router();
-const { protect, authorize } = require('../middleware/auth');
+const { protect, checkPermission } = require('../middleware/auth');
 const payrollController = require('../controllers/payrollController');
 
 // ── CALCULATION & QUERY ROUTES ─────────────────────────────────────────────
-// Admins see all employees; Employees see only themselves (enforced in controller)
-router.get('/calculate', protect, payrollController.calculatePayroll);
-router.get('/', protect, payrollController.calculatePayroll);
-router.get('/employee/:id', protect, payrollController.getEmployeeSalaryDetail);
+router.get('/calculate', protect, checkPermission('payroll', 'view'), payrollController.calculatePayroll);
+router.get('/', protect, checkPermission('payroll', 'view'), payrollController.calculatePayroll);
+router.get('/employee/:id', protect, checkPermission('payroll', 'view'), payrollController.getEmployeeSalaryDetail);
 
 // ── ADMIN PAYROLL ACTIONS ──────────────────────────────────────────────────
-router.post('/approve', protect, authorize('ADMIN'), payrollController.approvePayroll);
-router.post('/pay', protect, authorize('ADMIN'), payrollController.markPayrollPaid);
-router.put('/employee-salary/:id', protect, authorize('ADMIN'), payrollController.updateEmployeeSalaryStructure);
+router.post('/approve', protect, checkPermission('payroll', 'edit'), payrollController.approvePayroll);
+router.post('/pay', protect, checkPermission('payroll', 'edit'), payrollController.markPayrollPaid);
+router.put('/employee-salary/:id', protect, checkPermission('payroll', 'edit'), payrollController.updateEmployeeSalaryStructure);
 
 // ── PAYSLIP DISPATCH ───────────────────────────────────────────────────────
-router.post('/send-payslip', protect, payrollController.sendPayslip);
+router.post('/send-payslip', protect, checkPermission('payroll', 'edit'), payrollController.sendPayslip);
 
 // ── PAYROLL CONFIGURATION (WORKING DAYS, HOLIDAYS, RULES) ──────────────────
-router.get('/config', protect, payrollController.getPayrollConfigHandler);
-router.put('/config', protect, authorize('ADMIN'), payrollController.updatePayrollConfigHandler);
+router.get('/config', protect, checkPermission('payroll', 'view'), payrollController.getPayrollConfigHandler);
+router.put('/config', protect, checkPermission('payroll', 'edit'), payrollController.updatePayrollConfigHandler);
 
 module.exports = router;

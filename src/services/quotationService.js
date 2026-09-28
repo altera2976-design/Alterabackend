@@ -131,13 +131,13 @@ async function generateQuotationNumber() {
     .sort({ quotationNumber: -1, createdAt: -1 })
     .lean();
 
-  let nextSeq = 1001;
+  let nextSeq = 1000;
   if (latest && latest.quotationNumber) {
     const parts = latest.quotationNumber.split('-');
     if (parts.length >= 3) {
       const parsed = parseInt(parts[2], 10);
       if (!isNaN(parsed)) {
-        nextSeq = parsed + 1;
+        nextSeq = Math.max(1000, parsed + 1);
       }
     }
   }
@@ -200,8 +200,8 @@ async function getQuotationConfig() {
 /**
  * Calculates complete itemized amounts, fees, taxes, milestones, and grand total
  */
-function calculateQuotationPricing(items = [], pricingOptions = {}, milestones = []) {
-  let rawSubtotal = 0;
+function calculateQuotationPricing(items = [], pricingOptions = {}, milestones = [], standaloneAccessories = []) {
+  let rawItemSubtotal = 0;
 
   // Process item calculations
   const calculatedItems = items.map((item, idx) => {
@@ -240,7 +240,7 @@ function calculateQuotationPricing(items = [], pricingOptions = {}, milestones =
     const expectedAmount = baseAmount + accTotal;
     const itemAmount = (item.amount !== undefined && Number(item.amount) > expectedAmount) ? Number(item.amount) : expectedAmount;
 
-    rawSubtotal += itemAmount;
+    rawItemSubtotal += itemAmount;
 
     const rawUnit = item.unit ? String(item.unit).trim().toLowerCase() : '';
     const unit = ['pieces', 'piece', 'pcs', 'pc'].includes(rawUnit) ? 'Pcs' : (item.unit || 'Sq Ft');
@@ -262,6 +262,28 @@ function calculateQuotationPricing(items = [], pricingOptions = {}, milestones =
     };
   });
 
+  // Process standalone accessories
+  let standaloneAccessoriesTotal = 0;
+  const processedStandaloneAccessories = Array.isArray(standaloneAccessories)
+    ? standaloneAccessories.map((acc) => {
+        const qty = Number(acc.quantity) >= 0 ? Number(acc.quantity) : 1;
+        const price = Number(acc.price) >= 0 ? Number(acc.price) : 0;
+        const total = Math.round(qty * price);
+        standaloneAccessoriesTotal += total;
+        return {
+          name: (acc.name || '').trim(),
+          description: (acc.description || '').trim(),
+          image: acc.image || '',
+          quantity: qty,
+          unit: (acc.unit || 'Pcs').trim(),
+          price,
+          total,
+        };
+      })
+    : [];
+
+  const rawSubtotal = rawItemSubtotal + standaloneAccessoriesTotal;
+
   // Additional Charges
   const handlingFeePercent = Number(pricingOptions.handlingFeePercent) || 0;
   const handlingFeeAmount =
@@ -275,6 +297,8 @@ function calculateQuotationPricing(items = [], pricingOptions = {}, milestones =
       ? Number(pricingOptions.designFeeAmount)
       : Math.round(rawSubtotal * (designFeePercent / 100));
 
+  const transportCharges = Number(pricingOptions.transportCharges) || 0;
+
   // Discount
   const discountType = pricingOptions.discountType === 'FIXED' ? 'FIXED' : 'PERCENT';
   const discountValue = Number(pricingOptions.discountValue) || 0;
@@ -286,7 +310,7 @@ function calculateQuotationPricing(items = [], pricingOptions = {}, milestones =
   }
 
   // Taxable Amount
-  const taxableAmount = Math.max(0, rawSubtotal + handlingFeeAmount + designFeeAmount - discountAmount);
+  const taxableAmount = Math.max(0, rawSubtotal + handlingFeeAmount + designFeeAmount + transportCharges - discountAmount);
 
   // GST
   const gstPercent = pricingOptions.gstPercent !== undefined ? Number(pricingOptions.gstPercent) : 18;
@@ -328,12 +352,15 @@ function calculateQuotationPricing(items = [], pricingOptions = {}, milestones =
 
   return {
     calculatedItems,
+    processedStandaloneAccessories,
     pricing: {
       subtotal: rawSubtotal,
+      accessoriesTotal: standaloneAccessoriesTotal,
       handlingFeePercent,
       handlingFeeAmount,
       designFeePercent,
       designFeeAmount,
+      transportCharges,
       discountType,
       discountValue,
       discountAmount,

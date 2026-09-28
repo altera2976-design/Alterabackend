@@ -39,10 +39,25 @@ exports.calculatePayroll = async (req, res, next) => {
 
     const config = await getPayrollConfig();
 
-    // Query active employees
-    // Admin sees all employees; non-admin employee sees only self
-    const query = { role: 'EMPLOYEE', status: 'ACTIVE' };
-    if (req.user && req.user.role !== 'ADMIN') {
+    // Query active & approved employees with configured salary
+    const query = {
+      role: 'EMPLOYEE',
+      status: 'ACTIVE',
+      $or: [
+        { accessStatus: { $in: ['APPROVED', 'ACTIVE'] } },
+        { accessStatus: { $exists: false } }
+      ],
+      $and: [
+        {
+          $or: [
+            { salary: { $gt: 0 } },
+            { 'salaryStructure.basic': { $gt: 0 } },
+            { salaryStatus: { $in: ['ACTIVE', 'UPDATED'] } }
+          ]
+        }
+      ]
+    };
+    if (req.user && req.user.role !== 'ADMIN' && req.user.role !== 'SUPER_ADMIN') {
       query._id = req.user._id;
     }
     const employees = await User.find(query).sort({ name: 1 });

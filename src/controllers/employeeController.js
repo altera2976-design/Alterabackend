@@ -1,9 +1,24 @@
+const mongoose = require('mongoose');
 const User = require('../models/User');
 const { generateEmployeeId } = require('../services/employeeIdService');
 const { AppError } = require('../middleware/errorHandler');
 const { isPasswordCompromised } = require('../utils/hibp');
 
 const ALLOWED_ROLES = ["SUPER_ADMIN", "ADMIN", "SALES", "MANAGER", "DESIGNER", "PROJECT_MANAGER", "EMPLOYEE"];
+
+const findEmployeeById = async (id, selectPassword = false) => {
+  if (!id) return null;
+  let query = null;
+  if (mongoose.Types.ObjectId.isValid(id)) {
+    query = User.findById(id);
+    if (selectPassword) query = query.select('+password');
+    const emp = await query;
+    if (emp) return emp;
+  }
+  query = User.findOne({ $or: [{ employeeId: id }, { email: id }] });
+  if (selectPassword) query = query.select('+password');
+  return await query;
+};
 
 /**
  * GET /api/employees
@@ -370,6 +385,106 @@ exports.deleteEmployee = async (req, res, next) => {
 };
 
 /**
+ * PATCH /api/employees/:id/access-status
+ * Admin / Super Admin — approve/give access or suspend access for an employee
+ */
+exports.updateAccessStatus = async (req, res, next) => {
+  try {
+    const { accessStatus } = req.body;
+    const validStatuses = ['PENDING', 'APPROVED', 'ACTIVE', 'SUSPENDED', 'REJECTED'];
+
+    if (!accessStatus || !validStatuses.includes(accessStatus.toUpperCase())) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid access status. Must be one of: PENDING, APPROVED, ACTIVE, SUSPENDED, REJECTED',
+      });
+    }
+
+    const employee = await findEmployeeById(req.params.id);
+    if (!employee) {
+      return res.status(404).json({ success: false, message: 'User not found.' });
+    }
+
+    const targetStatus = accessStatus.toUpperCase();
+    employee.accessStatus = targetStatus;
+
+    if (targetStatus === 'APPROVED' || targetStatus === 'ACTIVE') {
+      employee.status = 'ACTIVE';
+    } else if (targetStatus === 'SUSPENDED' || targetStatus === 'REJECTED') {
+      employee.status = 'INACTIVE';
+    }
+
+    await employee.save();
+
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('employee_updated', { type: 'ACCESS_STATUS_UPDATED', employee });
+      io.emit('dashboard_updated', { type: 'EMPLOYEE_ACCESS_UPDATED' });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Employee access status updated to ${targetStatus} successfully.`,
+      employee,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/employees/:id/salary-setup
+ * Admin / Super Admin — configure or update salary settings for EXISTING employeeId
+ */
+exports.updateSalarySetup = async (req, res, next) => {
+  try {
+    const { basicSalary, basic, allowances, hra, bonus, overtimeRate, effectiveFrom } = req.body;
+
+    const employee = await findEmployeeById(req.params.id);
+    if (!employee) {
+      return res.status(404).json({ success: false, message: 'User not found.' });
+    }
+
+    const bSalary = Number(basicSalary !== undefined ? basicSalary : (basic || 0));
+    const allw = Number(allowances || 0);
+    const h = Number(hra || 0);
+    const bns = Number(bonus || 0);
+    const otRate = Number(overtimeRate || 200);
+
+    const totalSalary = bSalary + allw + h;
+
+    employee.salary = totalSalary;
+    employee.salaryStructure = {
+      ...employee.salaryStructure,
+      basic: bSalary,
+      allowances: allw,
+      hra: h,
+      bonus: bns,
+      overtimeRate: otRate,
+      effectiveDate: effectiveFrom ? new Date(effectiveFrom) : new Date(),
+    };
+
+    employee.salaryStatus = employee.salaryStatus === 'NOT_SET' ? 'ACTIVE' : 'UPDATED';
+
+    await employee.save();
+
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('employee_updated', { type: 'SALARY_UPDATED', employee });
+      io.emit('dashboard_updated', { type: 'EMPLOYEE_SALARY_UPDATED' });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Salary for ${employee.name} (${employee.employeeId || 'EMP'}) updated to ₹${totalSalary.toLocaleString('en-IN')}.`,
+      employee,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * POST /api/employees/:id/documents
  * Upload an HR/Employee document to Google Drive (Employee Documents folder)
  */
@@ -494,6 +609,157 @@ exports.getEmployeeDocuments = async (req, res, next) => {
       employeeId: user.employeeId,
       name: user.name,
       documents: user.documents || [],
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/employee/permissions
+ * GET /api/employees/permissions
+ * GET /api/employees/my-permissions
+ * Get logged-in employee's app permissions
+ */
+exports.getMyAppPermissions = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found.' });
+    }
+
+    const defaultAppPerms = {
+      dashboard: true,
+      tasks: false,
+      attendance: true,
+      salary: false,
+      crm: false,
+      projects: false,
+      quotation: false,
+      reports: false,
+      bikeTracking: false,
+    };
+
+    const employeeAppPermissions = {
+      ...defaultAppPerms,
+      ...(user.employeeAppPermissions || {}),
+    };
+
+    res.status(200).json({
+      success: true,
+      employeeAppPermissions,
+      user: {
+        _id: user._id,
+        employeeId: user.employeeId,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        status: user.status,
+        accessStatus: user.accessStatus,
+        salaryStatus: user.salaryStatus,
+        employeeAppPermissions,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/employees/:id/app-permissions
+ * Super Admin — get employee app permissions by ID
+ */
+exports.getEmployeeAppPermissions = async (req, res, next) => {
+  try {
+    const employee = await findEmployeeById(req.params.id);
+    if (!employee) {
+      return res.status(404).json({ success: false, message: 'Employee not found.' });
+    }
+
+    const defaultAppPerms = {
+      dashboard: true,
+      tasks: false,
+      attendance: true,
+      salary: false,
+      crm: false,
+      projects: false,
+      quotation: false,
+      reports: false,
+      bikeTracking: false,
+    };
+
+    const employeeAppPermissions = {
+      ...defaultAppPerms,
+      ...(employee.employeeAppPermissions || {}),
+    };
+
+    res.status(200).json({
+      success: true,
+      employeeId: employee.employeeId,
+      name: employee.name,
+      employeeAppPermissions,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * PUT /api/employee/permissions/:employeeId
+ * PUT /api/employees/:id/app-permissions
+ * Super Admin — update employee app permissions
+ */
+exports.updateAppPermissions = async (req, res, next) => {
+  try {
+    const targetId = req.params.id || req.params.employeeId;
+    const employee = await findEmployeeById(targetId);
+    if (!employee) {
+      return res.status(404).json({ success: false, message: 'Employee not found.' });
+    }
+
+    const permsInput = req.body.employeeAppPermissions || req.body.permissions || req.body;
+
+    const currentPerms = employee.employeeAppPermissions || {
+      dashboard: true,
+      tasks: false,
+      attendance: true,
+      salary: false,
+      crm: false,
+      projects: false,
+      quotation: false,
+      reports: false,
+      bikeTracking: false,
+    };
+
+    const updatedPerms = {
+      dashboard: permsInput.dashboard !== undefined ? Boolean(permsInput.dashboard) : Boolean(currentPerms.dashboard),
+      tasks: permsInput.tasks !== undefined ? Boolean(permsInput.tasks) : Boolean(currentPerms.tasks),
+      attendance: permsInput.attendance !== undefined ? Boolean(permsInput.attendance) : Boolean(currentPerms.attendance),
+      salary: permsInput.salary !== undefined ? Boolean(permsInput.salary) : Boolean(currentPerms.salary),
+      crm: permsInput.crm !== undefined ? Boolean(permsInput.crm) : Boolean(currentPerms.crm),
+      projects: permsInput.projects !== undefined ? Boolean(permsInput.projects) : Boolean(currentPerms.projects),
+      quotation: permsInput.quotation !== undefined ? Boolean(permsInput.quotation) : (permsInput.quotations !== undefined ? Boolean(permsInput.quotations) : Boolean(currentPerms.quotation)),
+      reports: permsInput.reports !== undefined ? Boolean(permsInput.reports) : Boolean(currentPerms.reports),
+      bikeTracking: permsInput.bikeTracking !== undefined ? Boolean(permsInput.bikeTracking) : Boolean(currentPerms.bikeTracking),
+    };
+
+    employee.employeeAppPermissions = updatedPerms;
+    await employee.save();
+
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('employee_permissions_updated', {
+        employeeId: employee._id,
+        customId: employee.employeeId,
+        employeeAppPermissions: updatedPerms,
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Employee app permissions updated successfully for ${employee.name}.`,
+      employeeAppPermissions: employee.employeeAppPermissions,
+      employee,
     });
   } catch (error) {
     next(error);

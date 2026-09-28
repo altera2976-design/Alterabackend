@@ -63,6 +63,10 @@ const TaskSchema = new mongoose.Schema(
       min: 0,
       max: 100,
     },
+    pdfUrl: {
+      type: String,
+      default: '',
+    },
     comments: [
       {
         authorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },

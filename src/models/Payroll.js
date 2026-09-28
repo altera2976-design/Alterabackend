@@ -59,6 +59,7 @@ const PayrollSchema = new mongoose.Schema(
       esi: { type: Number, default: 0 },
       profTax: { type: Number, default: 0 },
       tds: { type: Number, default: 0 },
+      advance: { type: Number, default: 0 },
       otherDeductions: { type: Number, default: 0 },
       totalDeductions: { type: Number, default: 0 },
     },

@@ -361,6 +361,7 @@ exports.getDashboardStats = async (req, res, next) => {
     // ==========================================
     // 2. EMPLOYEE DASHBOARD STATS (OPTIMIZED)
     // ==========================================
+    const currentMonth = todayStr.substring(0, 7);
     const [
       assignedProjects,
       assignedTasks,
@@ -368,22 +369,67 @@ exports.getDashboardStats = async (req, res, next) => {
       myPayslips,
       unreadNotifsCount,
       myAuditLogs,
+      monthlyAttendances,
     ] = await Promise.all([
       Project.find({ 'members.user': user._id }).sort({ updatedAt: -1 }).limit(5).lean(),
-      Task.find({ assignedTo: user._id, status: { $ne: 'Completed' } }).sort({ dueDate: 1 }).limit(10).lean(),
-      Attendance.findOne({ user: user._id, date: todayStr }).lean(),
-      Payroll.find({ user: user._id }).sort({ year: -1, month: -1 }).limit(6).lean(),
-      Notification.countDocuments({ user: user._id, isRead: false }),
+      Task.find({ assignedTo: user._id }).sort({ dueDate: 1 }).limit(10).lean(),
+      Attendance.findOne({ userId: user._id, date: todayStr }).lean(),
+      Payroll.find({ userId: user._id }).sort({ month: -1 }).limit(6).lean(),
+      Notification.countDocuments({ recipientId: user._id, isRead: false }),
       AuditLog.find({ actor: user.name }).sort({ createdAt: -1 }).limit(5).lean(),
+      Attendance.find({ userId: user._id, date: { $regex: `^${currentMonth}` } }).lean(),
     ]);
+
+    // Calculate Overtime & Salary for Employee
+    let totalOvertimeHours = 0;
+    const stdHours = user.workingHours || 8;
+    (monthlyAttendances || []).forEach((att) => {
+      let hrs = att.totalHours || 0;
+      if (!hrs && att.checkInTime && att.checkOutTime) {
+        const ms = new Date(att.checkOutTime).getTime() - new Date(att.checkInTime).getTime();
+        hrs = Math.round((ms / (1000 * 60 * 60)) * 10) / 10;
+      }
+      if (hrs > stdHours) {
+        totalOvertimeHours += Math.round((hrs - stdHours) * 10) / 10;
+      }
+    });
+
+    const overtimeRate = user.salaryStructure?.overtimeRate || 200;
+    const overtimePayment = Math.round(totalOvertimeHours * overtimeRate);
+    const basicSalary = user.salaryStructure?.basic || user.salary || 35000;
+    const netSalary = Math.round(basicSalary + overtimePayment);
 
     return res.status(200).json({
       success: true,
       role: 'EMPLOYEE',
       data: {
+        welcomeName: user.name,
+        designation: user.designation,
+        employeeId: user.employeeId,
         myProjects: assignedProjects,
-        myTasks: assignedTasks,
-        todayAttendance: todayAttendanceRecord,
+        myTasks: {
+          pending: assignedTasks.filter((t) => t.status !== 'Completed').length,
+          topTasks: assignedTasks,
+        },
+        todayAttendance: todayAttendanceRecord
+          ? {
+              _id: todayAttendanceRecord._id,
+              isCheckedIn: !!todayAttendanceRecord.checkInTime,
+              isCheckedOut: !!todayAttendanceRecord.checkOutTime,
+              status: todayAttendanceRecord.status,
+              checkInTime: todayAttendanceRecord.checkInTime,
+              checkOutTime: todayAttendanceRecord.checkOutTime,
+              totalHours: todayAttendanceRecord.totalHours || 0,
+              remarks: todayAttendanceRecord.remarks || [],
+            }
+          : null,
+        mySalary: {
+          basicSalary,
+          overtimeHours: totalOvertimeHours,
+          overtimeRate,
+          overtimePayment,
+          netSalary,
+        },
         myPayslips,
         unreadNotifications: unreadNotifsCount,
         recentActivities: myAuditLogs,

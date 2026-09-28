@@ -13,9 +13,16 @@ const {
   reviewAttendanceRecord,
   getGeofenceConfig,
   updateGeofenceConfig,
+  addRemark,
+  cleanupOldSelfiesEndpoint,
 } = require("../controllers/attendanceController");
 
 const router = express.Router();
+
+// ── REMARKS & CLEANUP ROUTES ───────────────────────────────────────────────
+router.post("/remarks", protect, addRemark);
+router.post("/:id/remarks", protect, addRemark);
+router.post("/cleanup-selfies", protect, authorize("ADMIN"), cleanupOldSelfiesEndpoint);
 
 // ── SELFIE ATTENDANCE ROUTES ───────────────────────────────────────────────
 router.post(

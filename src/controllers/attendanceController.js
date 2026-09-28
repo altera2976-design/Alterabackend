@@ -808,3 +808,143 @@ exports.updateGeofenceConfig = async (req, res, next) => {
     next(error);
   }
 };
+
+/**
+ * Add a remark to an attendance record
+ * POST /api/attendance/:id/remarks or POST /api/attendance/remarks
+ */
+exports.addRemark = async (req, res, next) => {
+  try {
+    const attendanceId = req.params.id || req.body.attendanceId;
+    const { text, date } = req.body;
+
+    if (!text || !text.trim()) {
+      return res.status(400).json({ success: false, message: 'Remark text is required.' });
+    }
+
+    let attendance;
+    if (attendanceId) {
+      attendance = await Attendance.findById(attendanceId);
+    } else if (date) {
+      const queryDate = date || new Date().toISOString().split('T')[0];
+      const targetUserId = (req.user.role === 'ADMIN' || req.user.role === 'SUPER_ADMIN') && req.body.userId 
+        ? req.body.userId 
+        : req.user._id;
+      
+      attendance = await Attendance.findOne({ userId: targetUserId, date: queryDate });
+      if (!attendance) {
+        attendance = await Attendance.create({
+          userId: targetUserId,
+          date: queryDate,
+          status: 'PRESENT',
+          checkInTime: new Date(),
+        });
+      }
+    }
+
+    if (!attendance) {
+      return res.status(404).json({ success: false, message: 'Attendance record not found.' });
+    }
+
+    const isAdmin = req.user.role === 'ADMIN' || req.user.role === 'SUPER_ADMIN';
+    if (!isAdmin && String(attendance.userId) !== String(req.user._id)) {
+      return res.status(403).json({ success: false, message: 'Access denied. You can only add remarks to your own attendance.' });
+    }
+
+    const newRemark = {
+      text: text.trim(),
+      addedBy: req.user._id,
+      addedByName: req.user.name || 'User',
+      addedByRole: req.user.role || 'EMPLOYEE',
+      createdAt: new Date(),
+    };
+
+    if (!attendance.remarks) {
+      attendance.remarks = [];
+    }
+    attendance.remarks.push(newRemark);
+    await attendance.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Remark added successfully.',
+      remarks: attendance.remarks,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * 45-Day Attendance Selfie Cleanup Job & Endpoint
+ * Automatically deletes selfie image files and clears checkInSelfie / checkOutSelfie
+ * for attendance records older than 45 days while keeping attendance history intact.
+ */
+const performSelfieCleanup45Days = async () => {
+  try {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - 45);
+
+    const records = await Attendance.find({
+      $or: [
+        { checkInTime: { $lt: cutoffDate } },
+        { createdAt: { $lt: cutoffDate } },
+      ],
+      $and: [
+        {
+          $or: [
+            { checkInSelfie: { $ne: null } },
+            { checkOutSelfie: { $ne: null } },
+            { checkInSelfieDriveId: { $ne: null } },
+            { checkOutSelfieDriveId: { $ne: null } },
+          ],
+        },
+      ],
+    });
+
+    let cleanedCount = 0;
+
+    for (const att of records) {
+      if (att.checkInSelfie && att.checkInSelfie.startsWith('/uploads/')) {
+        const localPath = path.join(__dirname, '../../', att.checkInSelfie);
+        if (fs.existsSync(localPath)) {
+          fs.unlink(localPath, () => {});
+        }
+      }
+      if (att.checkOutSelfie && att.checkOutSelfie.startsWith('/uploads/')) {
+        const localPath = path.join(__dirname, '../../', att.checkOutSelfie);
+        if (fs.existsSync(localPath)) {
+          fs.unlink(localPath, () => {});
+        }
+      }
+
+      att.checkInSelfie = null;
+      att.checkOutSelfie = null;
+      att.checkInSelfieDriveId = null;
+      att.checkOutSelfieDriveId = null;
+      await att.save();
+      cleanedCount++;
+    }
+
+    console.log(`🧹 [CLEANUP] Successfully removed 45-day-old selfie images for ${cleanedCount} attendance records.`);
+    return cleanedCount;
+  } catch (err) {
+    console.error('⚠️ [CLEANUP] Error during 45-day selfie cleanup:', err.message);
+    return 0;
+  }
+};
+
+exports.performSelfieCleanup45Days = performSelfieCleanup45Days;
+
+exports.cleanupOldSelfiesEndpoint = async (req, res, next) => {
+  try {
+    const count = await performSelfieCleanup45Days();
+    res.status(200).json({
+      success: true,
+      message: `Cleaned up 45-day old attendance selfies for ${count} records. Attendance history preserved.`,
+      cleanedCount: count,
+    });
+  } catch (error) {
+    next(error);
+  }
+};

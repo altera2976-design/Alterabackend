@@ -74,6 +74,7 @@ app.use(generalLimiter);
 app.use("/api/health", require("./src/routes/health"));
 app.use("/api/auth", require("./src/routes/auth"));
 app.use("/api/employees", require("./src/routes/employees"));
+app.use("/api/employee", require("./src/routes/employees"));
 app.use("/api/users", require("./src/routes/employees"));
 app.use("/api/attendance", require("./src/routes/attendanceRoutes"));
 app.use("/api/payroll", require("./src/routes/payrollRoutes"));

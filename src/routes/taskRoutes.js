@@ -7,6 +7,8 @@ const { handleUpload } = require('../middleware/upload');
 
 router.use(protect);
 
+router.get('/my-tasks', taskController.getEmployeeTasks);
+
 router.route('/')
   .get(checkPermission('tasks', 'view'), taskController.getTasks)
   .post(checkPermission('tasks', 'create'), handleUpload('attachments', 10), taskController.createTask);

@@ -160,7 +160,20 @@ const recalculateProjectProgress = async (projectId) => {
  */
 exports.getTasks = async (req, res, next) => {
   try {
-    const isAdmin = req.user.role === 'ADMIN';
+    const user = req.user;
+    const isSuperOrAdmin = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.email === 'admin@alterainterior.com' || user.email === 'admin@company.com';
+    
+    // Permission check for non-admin employees
+    if (!isSuperOrAdmin) {
+      const appPerms = user.employeeAppPermissions || {};
+      if (appPerms.tasks !== true) {
+        return res.status(403).json({
+          success: false,
+          message: 'Tasks permission is not enabled for this employee.',
+        });
+      }
+    }
+
     const { projectId, assignedTo, status } = req.query;
 
     const filter = {};
@@ -170,11 +183,60 @@ exports.getTasks = async (req, res, next) => {
       else filter.status = status;
     }
 
-    if (!isAdmin) {
+    if (!isSuperOrAdmin) {
       // Employees ONLY see their own assigned tasks
-      filter.assignedTo = req.user._id;
+      filter.$or = [
+        { assignedTo: user._id },
+        { assignedTo: user.employeeId },
+      ];
     } else if (assignedTo) {
       filter.assignedTo = assignedTo;
+    }
+
+    const tasks = await Task.find(filter).sort({ createdAt: -1 });
+    res.status(200).json({ success: true, count: tasks.length, data: tasks });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/employee/tasks
+ * Retrieve tasks specifically assigned to logged-in employee with permissions check
+ */
+exports.getEmployeeTasks = async (req, res, next) => {
+  try {
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'Authentication required.' });
+    }
+
+    if (user.status !== 'ACTIVE') {
+      return res.status(403).json({ success: false, message: 'Your account is inactive. Please contact administrator.' });
+    }
+
+    const isSuperOrAdmin = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.email === 'admin@alterainterior.com' || user.email === 'admin@company.com';
+    const appPermissions = user.employeeAppPermissions || {};
+
+    if (!isSuperOrAdmin && appPermissions.tasks !== true) {
+      return res.status(403).json({
+        success: false,
+        message: 'Tasks permission is not enabled for this employee.',
+      });
+    }
+
+    const { projectId, status } = req.query;
+    const filter = {
+      $or: [
+        { assignedTo: user._id },
+        { assignedTo: user.employeeId },
+      ],
+    };
+
+    if (projectId) filter.projectId = projectId;
+    if (status && status !== 'All') {
+      if (status === 'Pending') filter.status = 'To Do';
+      else filter.status = status;
     }
 
     const tasks = await Task.find(filter).sort({ createdAt: -1 });
@@ -189,13 +251,25 @@ exports.getTasks = async (req, res, next) => {
  */
 exports.getTask = async (req, res, next) => {
   try {
+    const user = req.user;
+    const isSuperOrAdmin = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.email === 'admin@alterainterior.com' || user.email === 'admin@company.com';
+
+    if (!isSuperOrAdmin) {
+      const appPerms = user.employeeAppPermissions || {};
+      if (appPerms.tasks !== true) {
+        return res.status(403).json({
+          success: false,
+          message: 'Tasks permission is not enabled for this employee.',
+        });
+      }
+    }
+
     const task = await Task.findById(req.params.id);
     if (!task) {
       return res.status(404).json({ success: false, message: 'Task not found' });
     }
 
-    const isAdmin = req.user.role === 'ADMIN';
-    if (!isAdmin && task.assignedTo.toString() !== req.user._id.toString()) {
+    if (!isSuperOrAdmin && task.assignedTo.toString() !== user._id.toString() && task.assignedTo.toString() !== (user.employeeId || '')) {
       return res.status(403).json({ success: false, message: 'Access denied to this task.' });
     }
 

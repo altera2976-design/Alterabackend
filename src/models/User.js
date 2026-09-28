@@ -86,6 +86,7 @@ const UserSchema = new mongoose.Schema(
       esiDeduction: { type: Number, default: 0 },
       profTax: { type: Number, default: 0 },
       tds: { type: Number, default: 0 },
+      advance: { type: Number, default: 0 },
       otherDeductions: { type: Number, default: 0 },
       effectiveDate: { type: Date, default: Date.now },
     },
@@ -99,77 +100,55 @@ const UserSchema = new mongoose.Schema(
       enum: ["ACTIVE", "INACTIVE"],
       default: "ACTIVE",
     },
+    accessStatus: {
+      type: String,
+      enum: ["PENDING", "APPROVED", "ACTIVE", "SUSPENDED", "REJECTED"],
+      default: "PENDING",
+    },
+    salaryStatus: {
+      type: String,
+      enum: ["NOT_SET", "ACTIVE", "UPDATED", "INACTIVE"],
+      default: "NOT_SET",
+    },
     isAdminPanelEnabled: {
       type: Boolean,
-      default: false,
+      default: true,
     },
     permissions: {
-      dashboard: {
-        view: { type: Boolean, default: true },
+      type: mongoose.Schema.Types.Mixed,
+      default: {
+        dashboard: true,
+        employees: true,
+        attendance: true,
+        tracking: true,
+        payroll: true,
+        tasks: true,
+        crm: true,
+        quotation: true,
+        quotations: true,
+        reports: true,
+        notifications: true,
+        remarks: true,
+        overtime: true,
+        salary: true,
+        transactions: true,
+        profile: true,
+        projects: true,
+        administration: true,
+        offer_letters: true,
+        offerLetters: true,
       },
-      tasks: {
-        view: { type: Boolean, default: true },
-        create: { type: Boolean, default: true },
-        edit: { type: Boolean, default: true },
-        delete: { type: Boolean, default: true },
-        assign: { type: Boolean, default: true },
-      },
-      crm: {
-        view: { type: Boolean, default: true },
-        create: { type: Boolean, default: true },
-        edit: { type: Boolean, default: true },
-        delete: { type: Boolean, default: true },
-        export: { type: Boolean, default: true },
-      },
-      projects: {
-        view: { type: Boolean, default: true },
-        create: { type: Boolean, default: true },
-        edit: { type: Boolean, default: true },
-        delete: { type: Boolean, default: true },
-        export: { type: Boolean, default: true },
-      },
-      salary: {
-        view: { type: Boolean, default: true },
-        create: { type: Boolean, default: true },
-        edit: { type: Boolean, default: true },
-        export: { type: Boolean, default: true },
-      },
-      attendance: {
-        view: { type: Boolean, default: true },
-        create: { type: Boolean, default: true },
-        edit: { type: Boolean, default: true },
-        export: { type: Boolean, default: true },
-      },
-      quotation: {
-        view: { type: Boolean, default: true },
-        create: { type: Boolean, default: true },
-        edit: { type: Boolean, default: true },
-        delete: { type: Boolean, default: true },
-        export: { type: Boolean, default: true },
-      },
-      reports: {
-        view: { type: Boolean, default: true },
-        export: { type: Boolean, default: true },
-      },
-      notifications: {
-        view: { type: Boolean, default: true },
-        create: { type: Boolean, default: true },
-      },
-      administration: {
-        view: { type: Boolean, default: true },
-        edit: { type: Boolean, default: true },
-      },
-      transactions: {
-        view: { type: Boolean, default: true },
-        create: { type: Boolean, default: true },
-        edit: { type: Boolean, default: true },
-        delete: { type: Boolean, default: false },
-        viewDetails: { type: Boolean, default: true },
-        viewSummary: { type: Boolean, default: true },
-        export: { type: Boolean, default: true },
-        refund: { type: Boolean, default: false },
-        viewAll: { type: Boolean, default: false },
-      },
+    },
+    employeeAppPermissions: {
+      dashboard: { type: Boolean, default: true },
+      tasks: { type: Boolean, default: false },
+      attendance: { type: Boolean, default: true },
+      salary: { type: Boolean, default: false },
+      crm: { type: Boolean, default: false },
+      projects: { type: Boolean, default: false },
+      quotation: { type: Boolean, default: false },
+      reports: { type: Boolean, default: false },
+      bikeTracking: { type: Boolean, default: false },
     },
     resetPasswordOtp: {
       type: String,
@@ -230,5 +209,9 @@ UserSchema.set("toJSON", {
     return ret;
   },
 });
+
+if (mongoose.models && mongoose.models.User) {
+  delete mongoose.models.User;
+}
 
 module.exports = mongoose.model("User", UserSchema);

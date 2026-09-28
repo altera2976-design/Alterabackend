@@ -238,6 +238,7 @@ async function calculateEmployeePayroll(emp, month, config) {
 
   const profTax = struct.profTax !== undefined ? struct.profTax : (deductionRules.profTaxFixed || 0);
   const tds = struct.tds || 0;
+  const advance = struct.advance !== undefined ? struct.advance : 0;
   const otherDeductions = struct.otherDeductions || 0;
 
   const totalDeductions =
@@ -247,6 +248,7 @@ async function calculateEmployeePayroll(emp, month, config) {
     esi +
     profTax +
     tds +
+    advance +
     otherDeductions;
 
   // ── Net Salary ────────────────────────────────────────────────────────────
@@ -289,6 +291,7 @@ async function calculateEmployeePayroll(emp, month, config) {
       esi,
       profTax,
       tds,
+      advance,
       otherDeductions,
       totalDeductions,
     },

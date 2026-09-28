@@ -119,6 +119,15 @@ const AttendanceSchema = new mongoose.Schema(
     reviewedAt: {
       type: Date,
     },
+    remarks: [
+      {
+        text: { type: String, required: true },
+        addedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        addedByName: { type: String, default: '' },
+        addedByRole: { type: String, default: 'EMPLOYEE' },
+        createdAt: { type: Date, default: Date.now },
+      },
+    ],
   },
   {
     timestamps: true,

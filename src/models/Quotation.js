@@ -162,12 +162,25 @@ const QuotationSchema = new mongoose.Schema(
       required: true,
     },
     items: [QuotationItemSchema],
+    standaloneAccessories: [
+      {
+        name: { type: String, required: true, trim: true },
+        description: { type: String, default: '', trim: true },
+        image: { type: String, default: '' },
+        quantity: { type: Number, default: 1, min: 0 },
+        unit: { type: String, default: 'Pcs', trim: true },
+        price: { type: Number, default: 0, min: 0 },
+        total: { type: Number, default: 0, min: 0 },
+      },
+    ],
     pricing: {
       subtotal: { type: Number, default: 0 },
+      accessoriesTotal: { type: Number, default: 0 },
       handlingFeePercent: { type: Number, default: 2 },
       handlingFeeAmount: { type: Number, default: 0 },
       designFeePercent: { type: Number, default: 2 },
       designFeeAmount: { type: Number, default: 0 },
+      transportCharges: { type: Number, default: 0 },
       discountType: {
         type: String,
         enum: ['PERCENT', 'FIXED'],

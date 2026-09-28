@@ -8,8 +8,22 @@ const googleDriveService = require("./src/services/googleDrive.service");
 const PORT = process.env.PORT || 5001;
 
 const startServer = async () => {
+  // Connect database and initialize services (updated schema)
   await connectDB();
   await googleDriveService.initializeFolderStructure();
+
+  // Scheduled 45-day attendance selfie cleanup (Runs on startup & every 24 hrs)
+  try {
+    const { performSelfieCleanup45Days } = require("./src/controllers/attendanceController");
+    setTimeout(() => {
+      performSelfieCleanup45Days();
+    }, 10000);
+    setInterval(() => {
+      performSelfieCleanup45Days();
+    }, 24 * 60 * 60 * 1000);
+  } catch (err) {
+    console.warn("⚠️ Failed to initialize selfie cleanup timer:", err.message);
+  }
 
 
   // Create HTTP server

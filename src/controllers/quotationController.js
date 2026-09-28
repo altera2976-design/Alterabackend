@@ -42,6 +42,7 @@ exports.createQuotation = async (req, res, next) => {
       quotationDate,
       validUntil,
       items,
+      standaloneAccessories = [],
       pricing: pricingOptions = {},
       paymentMilestones,
       termsAndConditions,
@@ -54,8 +55,8 @@ exports.createQuotation = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Client name is required.' });
     }
 
-    if (!items || !Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ success: false, message: 'At least one quotation item is required.' });
+    if ((!items || !Array.isArray(items) || items.length === 0) && (!standaloneAccessories || standaloneAccessories.length === 0)) {
+      return res.status(400).json({ success: false, message: 'At least one quotation item or accessory is required.' });
     }
 
     // Default validity date to 30 days ahead if not provided
@@ -77,8 +78,8 @@ exports.createQuotation = async (req, res, next) => {
     const publicToken = generatePublicToken();
 
     // Run Calculation Engine
-    const { calculatedItems, pricing, paymentMilestones: calculatedMilestones, isMilestonesValid, totalPercentage } =
-      calculateQuotationPricing(items, pricingOptions, paymentMilestones || globalConfig.defaultMilestones);
+    const { calculatedItems, processedStandaloneAccessories, pricing, paymentMilestones: calculatedMilestones, isMilestonesValid, totalPercentage } =
+      calculateQuotationPricing(items, pricingOptions, paymentMilestones || globalConfig.defaultMilestones, standaloneAccessories);
 
     if (!isMilestonesValid) {
       return res.status(400).json({
@@ -111,6 +112,7 @@ exports.createQuotation = async (req, res, next) => {
       quotationDate: qDate,
       validUntil: vUntil,
       items: calculatedItems,
+      standaloneAccessories: processedStandaloneAccessories,
       pricing,
       paymentMilestones: calculatedMilestones,
       termsAndConditions: termsAndConditions && termsAndConditions.length > 0 ? termsAndConditions : globalConfig.termsAndConditions,
@@ -485,6 +487,7 @@ exports.updateQuotation = async (req, res, next) => {
       assignedDesigner,
       validUntil,
       items,
+      standaloneAccessories,
       pricing: pricingOptions = {},
       paymentMilestones,
       termsAndConditions,
@@ -504,11 +507,12 @@ exports.updateQuotation = async (req, res, next) => {
     }
 
     // Calculation Engine
-    const { calculatedItems, pricing, paymentMilestones: calculatedMilestones, isMilestonesValid, totalPercentage } =
+    const { calculatedItems, processedStandaloneAccessories, pricing, paymentMilestones: calculatedMilestones, isMilestonesValid, totalPercentage } =
       calculateQuotationPricing(
         items || existing.items,
         pricingOptions,
-        paymentMilestones || existing.paymentMilestones
+        paymentMilestones || existing.paymentMilestones,
+        standaloneAccessories !== undefined ? standaloneAccessories : existing.standaloneAccessories
       );
 
     if (!isMilestonesValid) {
@@ -552,6 +556,7 @@ exports.updateQuotation = async (req, res, next) => {
         quotationDate: existing.quotationDate,
         validUntil: validUntil ? new Date(validUntil) : existing.validUntil,
         items: calculatedItems,
+        standaloneAccessories: processedStandaloneAccessories,
         pricing,
         paymentMilestones: calculatedMilestones,
         termsAndConditions: termsAndConditions || existing.termsAndConditions,
@@ -589,6 +594,7 @@ exports.updateQuotation = async (req, res, next) => {
     if (assignedDesigner) existing.assignedDesigner = assignedDesigner;
     if (validUntil) existing.validUntil = new Date(validUntil);
     if (items) existing.items = calculatedItems;
+    if (standaloneAccessories !== undefined) existing.standaloneAccessories = processedStandaloneAccessories;
     existing.pricing = pricing;
     existing.paymentMilestones = calculatedMilestones;
     if (termsAndConditions) existing.termsAndConditions = termsAndConditions;

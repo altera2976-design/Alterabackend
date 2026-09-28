@@ -9,6 +9,7 @@ const Quotation = require('../models/Quotation');
 const Invoice = require('../models/Invoice');
 const Expense = require('../models/Expense');
 const VendorPayment = require('../models/VendorPayment');
+const Transaction = require('../models/Transaction');
 const { sendReportEmail } = require('../services/emailService');
 
 const MONTH_NAMES = [
@@ -553,6 +554,25 @@ exports.getDetailedReport = async (req, res, next) => {
           paymentMethod: 'Bank Transfer / NEFT',
         }));
 
+        const actualTransactions = await Transaction.find({
+          $or: [
+            { paymentDate: { $gte: start, $lte: end } },
+            { createdAt: { $gte: start, $lte: end } }
+          ]
+        }).sort({ createdAt: -1 });
+
+        const txList = actualTransactions.map(tx => ({
+          _id: tx._id,
+          referenceId: tx.transactionId || `TX-${String(tx._id).slice(-5).toUpperCase()}`,
+          title: tx.description || `${tx.type || 'Payment'} - ${tx.category || 'General'}`,
+          party: tx.clientName || tx.recordedByName || 'Client / Party',
+          type: tx.type === 'INFLOW' || tx.type === 'CREDIT' ? 'Income' : 'Expense',
+          amount: tx.type === 'INFLOW' || tx.type === 'CREDIT' ? tx.amount : -tx.amount,
+          date: tx.paymentDate ? new Date(tx.paymentDate).toLocaleDateString('en-IN') : (tx.createdAt ? new Date(tx.createdAt).toLocaleDateString('en-IN') : '—'),
+          status: tx.status || 'Completed',
+          paymentMethod: tx.paymentMethod || 'Bank Transfer',
+        }));
+
         const tripExpenses = tripList.map(t => ({
           _id: t._id,
           referenceId: `EXP-TRIP-${String(t._id).slice(-5).toUpperCase()}`,
@@ -565,7 +585,7 @@ exports.getDetailedReport = async (req, res, next) => {
           paymentMethod: 'Direct Reimbursement',
         }));
 
-        let combined = [...projPayments, ...tripExpenses];
+        let combined = txList.length > 0 ? [...txList, ...tripExpenses] : [...projPayments, ...tripExpenses];
 
         if (status && status !== 'All') {
           combined = combined.filter(item => item.type === status || item.status === status);

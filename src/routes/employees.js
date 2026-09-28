@@ -6,11 +6,25 @@ const employeeController = require('../controllers/employeeController');
 const { protect, authorize } = require('../middleware/auth');
 const validate = require('../middleware/validate');
 
+const taskController = require('../controllers/taskController');
+
 // All routes require authentication
 router.use(protect);
 
+// Employee App Permissions routes
+router.get('/permissions', employeeController.getMyAppPermissions);
+router.get('/my-permissions', employeeController.getMyAppPermissions);
+router.get('/tasks', taskController.getEmployeeTasks);
+
 // GET /api/employees & GET /api/users (Accessible for employee lists & dropdowns)
 router.get('/', employeeController.getAllEmployees);
+router.get('/:id/app-permissions', authorize('ADMIN'), employeeController.getEmployeeAppPermissions);
+router.put('/:id/app-permissions', authorize('ADMIN'), employeeController.updateAppPermissions);
+router.post('/:id/app-permissions', authorize('ADMIN'), employeeController.updateAppPermissions);
+router.patch('/:id/app-permissions', authorize('ADMIN'), employeeController.updateAppPermissions);
+router.put('/permissions/:employeeId', authorize('ADMIN'), employeeController.updateAppPermissions);
+router.post('/permissions/:employeeId', authorize('ADMIN'), employeeController.updateAppPermissions);
+router.patch('/permissions/:employeeId', authorize('ADMIN'), employeeController.updateAppPermissions);
 router.get('/:id', employeeController.getEmployee);
 
 // POST /api/employees
@@ -40,6 +54,16 @@ router.patch('/:id/status', authorize('ADMIN'), employeeController.toggleStatus)
 router.put('/:id/reset-password', authorize('ADMIN'), employeeController.resetPassword);
 router.post('/:id/reset-password', authorize('ADMIN'), employeeController.resetPassword);
 router.patch('/:id/reset-password', authorize('ADMIN'), employeeController.resetPassword);
+
+// Access Status — support PUT, POST, PATCH
+router.put('/:id/access-status', authorize('ADMIN'), employeeController.updateAccessStatus);
+router.post('/:id/access-status', authorize('ADMIN'), employeeController.updateAccessStatus);
+router.patch('/:id/access-status', authorize('ADMIN'), employeeController.updateAccessStatus);
+
+// Salary Setup — support PUT, POST, PATCH
+router.put('/:id/salary-setup', authorize('ADMIN'), employeeController.updateSalarySetup);
+router.post('/:id/salary-setup', authorize('ADMIN'), employeeController.updateSalarySetup);
+router.patch('/:id/salary-setup', authorize('ADMIN'), employeeController.updateSalarySetup);
 
 // Panel Access — support PUT, POST, PATCH
 router.put('/:id/panel-access', authorize('ADMIN'), employeeController.togglePanelAccess);

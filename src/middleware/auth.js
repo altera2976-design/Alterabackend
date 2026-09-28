@@ -119,21 +119,42 @@ const checkPermission = (moduleName, action = "view") => {
     if (req.user?.isAdminPanelEnabled === false) {
       return res.status(403).json({
         success: false,
-        message:
-          "Admin Dashboard access has been revoked. Please contact the Super Admin.",
+        message: "Admin Panel access has not been granted by Super Admin.",
       });
     }
 
-    // Convert keys: e.g. offerLetters <-> offer_letters
-    const altModuleName = moduleName.includes("_")
-      ? moduleName.replace(/_([a-z])/g, (_, g) => g.toUpperCase())
-      : moduleName.replace(/([A-Z])/g, "_$1").toLowerCase();
+    // Module key aliases mapping
+    const ALIAS_MAP = {
+      payroll: ["payroll", "salary"],
+      salary: ["salary", "payroll"],
+      quotation: ["quotation", "quotations"],
+      quotations: ["quotations", "quotation"],
+      tracking: ["tracking", "bikeTracking", "bike_tracking"],
+      bikeTracking: ["bikeTracking", "tracking", "bike_tracking"],
+      employees: ["employees", "administration"],
+      administration: ["administration", "employees"],
+      remarks: ["remarks", "attendance"],
+      overtime: ["overtime", "salary", "payroll"],
+      offer_letters: ["offer_letters", "offerLetters"],
+      offerLetters: ["offerLetters", "offer_letters"],
+    };
+
+    const keysToCheck = ALIAS_MAP[moduleName] || [
+      moduleName,
+      moduleName.includes("_")
+        ? moduleName.replace(/_([a-z])/g, (_, g) => g.toUpperCase())
+        : moduleName.replace(/([A-Z])/g, "_$1").toLowerCase(),
+    ];
 
     const perms = req.user?.permissions || {};
-    const modPerms =
-      perms[moduleName] !== undefined
-        ? perms[moduleName]
-        : perms[altModuleName];
+    let modPerms = undefined;
+
+    for (const k of keysToCheck) {
+      if (perms[k] !== undefined) {
+        modPerms = perms[k];
+        break;
+      }
+    }
 
     if (modPerms !== undefined) {
       if (typeof modPerms === "boolean") {
@@ -141,34 +162,37 @@ const checkPermission = (moduleName, action = "view") => {
         if (modPerms === false) {
           return res.status(403).json({
             success: false,
-            message: `Access denied. You do not have permission for ${moduleName}.`,
+            message: "Access Denied — You don't have permission to access this module.",
           });
         }
       } else if (typeof modPerms === "object" && modPerms !== null) {
         if (modPerms[action] === true) return next();
+        if (action === "view" && (modPerms.view === true || Object.values(modPerms).some(v => v === true))) {
+          return next();
+        }
         if (
           modPerms[action] === false ||
-          (action === "view" && modPerms.view === false)
+          (action === "view" && modPerms.view === false) ||
+          Object.values(modPerms).every(v => v === false)
         ) {
           return res.status(403).json({
             success: false,
-            message: `Access denied. You do not have permission to ${action} in ${moduleName}.`,
+            message: "Access Denied — You don't have permission to access this module.",
           });
         }
       }
     }
 
-    // Admin role has access unless explicitly forbidden above
+    // For Admin roles, if modPerms was explicitly undefined, allow default unless forbidden
     if (userRole === "ADMIN" || userRole.includes("ADMIN")) {
       return next();
     }
 
-    // Default: allow viewing resources (GET requests) for all active authenticated users
+    // Default: allow viewing resources for active authenticated users
     if (action === "view") {
       return next();
     }
 
-    // Allow management roles for creation/editing actions unless explicitly disabled above
     const managementRoles = [
       "MANAGER",
       "SALES",
@@ -182,7 +206,7 @@ const checkPermission = (moduleName, action = "view") => {
 
     return res.status(403).json({
       success: false,
-      message: `Access denied. You do not have permission to ${action} in ${moduleName}.`,
+      message: "Access Denied — You don't have permission to access this module.",
     });
   };
 };
