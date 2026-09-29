@@ -19,11 +19,13 @@ router.put('/config', checkPermission('quotation', 'edit'), quotationController.
 // Quotation summary KPIs
 router.get('/summary', checkPermission('quotation', 'view'), quotationController.getQuotationSummary);
 
+const { handleUpload } = require('../middleware/upload');
+
 // Quotation CRUD
 router.get('/', checkPermission('quotation', 'view'), quotationController.getQuotations);
-router.post('/', checkPermission('quotation', 'create'), quotationController.createQuotation);
+router.post('/', checkPermission('quotation', 'create'), handleUpload('images', 20), quotationController.createQuotation);
 router.get('/:id', checkPermission('quotation', 'view'), quotationController.getQuotationById);
-router.put('/:id', checkPermission('quotation', 'edit'), quotationController.updateQuotation);
+router.put('/:id', checkPermission('quotation', 'edit'), handleUpload('images', 20), quotationController.updateQuotation);
 router.delete('/:id', checkPermission('quotation', 'delete'), quotationController.deleteQuotation);
 
 // Quotation specific actions & transactions

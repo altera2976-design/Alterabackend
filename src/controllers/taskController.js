@@ -83,9 +83,13 @@ const saveAttachmentFile = async (att, userId, userName) => {
         const ext = path.extname(fileName) || '';
         const safeName = `task_${Date.now()}_${Math.random().toString(36).substring(2, 7)}${ext}`;
         const filePath = path.join(uploadsDir, safeName);
-        const rawData = att.base64Data || att.base64;
-        const cleanBase64 = rawData.replace(/^data:[^;]+;base64,/, '');
-        fs.writeFileSync(filePath, Buffer.from(cleanBase64, 'base64'));
+        if (att.buffer) {
+          fs.writeFileSync(filePath, Buffer.from(att.buffer));
+        } else {
+          const rawData = att.base64Data || att.base64;
+          const cleanBase64 = rawData.replace(/^data:[^;]+;base64,/, '');
+          fs.writeFileSync(filePath, Buffer.from(cleanBase64, 'base64'));
+        }
         fileUrl = `uploads/tasks/${safeName}`;
       } catch (localErr) {
         console.error('Failed to write local task attachment fallback:', localErr);
@@ -184,11 +188,8 @@ exports.getTasks = async (req, res, next) => {
     }
 
     if (!isSuperOrAdmin) {
-      // Employees ONLY see their own assigned tasks
-      filter.$or = [
-        { assignedTo: user._id },
-        { assignedTo: user.employeeId },
-      ];
+      // Employees ONLY see their own assigned tasks (use ObjectId only, avoid string cast errors)
+      filter.assignedTo = user._id;
     } else if (assignedTo) {
       filter.assignedTo = assignedTo;
     }
@@ -226,11 +227,9 @@ exports.getEmployeeTasks = async (req, res, next) => {
     }
 
     const { projectId, status } = req.query;
+    // Filter by ObjectId only - Task.assignedTo is ObjectId, using string employeeId causes CastError
     const filter = {
-      $or: [
-        { assignedTo: user._id },
-        { assignedTo: user.employeeId },
-      ],
+      assignedTo: user._id,
     };
 
     if (projectId) filter.projectId = projectId;
@@ -346,6 +345,14 @@ exports.createTask = async (req, res, next) => {
       }
     }
 
+    let primaryPdfUrl = '';
+    const firstPdf = processedAttachments.find(a => 
+      a.mimeType?.includes('pdf') || a.fileType?.includes('pdf') || String(a.fileName).toLowerCase().endsWith('.pdf')
+    );
+    if (firstPdf) {
+      primaryPdfUrl = firstPdf.fileUrl || firstPdf.url;
+    }
+
     const task = await Task.create({
       taskId,
       projectId: project ? project._id : null,
@@ -359,6 +366,7 @@ exports.createTask = async (req, res, next) => {
       dueDate: dueDate || '',
       status: 'To Do',
       progress: 0,
+      pdfUrl: primaryPdfUrl,
       attachments: processedAttachments,
       createdBy: req.user._id,
     });

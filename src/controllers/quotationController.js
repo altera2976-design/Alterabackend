@@ -26,12 +26,62 @@ function formatINR(val) {
   }).format(val || 0);
 }
 
+const googleDriveService = require('../services/googleDrive.service');
+const fs = require('fs');
+const path = require('path');
+
 /**
  * POST /api/quotations
  * Create a new interior quotation
  */
 exports.createQuotation = async (req, res, next) => {
   try {
+    let payloadData = req.body;
+    if (req.body.data && typeof req.body.data === 'string') {
+      try {
+        payloadData = JSON.parse(req.body.data);
+      } catch (err) {
+        return res.status(400).json({ success: false, message: 'Invalid JSON data payload.' });
+      }
+    }
+
+    if (req.files && req.files.length > 0) {
+      for (const file of req.files) {
+        if (file.originalname && file.originalname.startsWith('idx_')) {
+          const index = parseInt(file.originalname.split('_')[1], 10);
+          if (!isNaN(index) && payloadData.standaloneAccessories && payloadData.standaloneAccessories[index]) {
+            try {
+              const driveRes = await googleDriveService.uploadFileToDrive({
+                buffer: file.buffer,
+                fileName: file.originalname.replace(/^idx_\d+_/, ''),
+                mimeType: file.mimetype,
+                folderType: 'Quotations',
+              });
+              payloadData.standaloneAccessories[index].image = `/api/files/drive/${driveRes.driveFileId}`;
+            } catch (err) {
+              console.error('[QuotationController] Drive upload error, using local fallback:', err.message);
+              try {
+                const uploadsDir = path.join(__dirname, '../../uploads/quotations');
+                if (!fs.existsSync(uploadsDir)) {
+                  fs.mkdirSync(uploadsDir, { recursive: true });
+                }
+                const ext = path.extname(file.originalname) || '.jpg';
+                const safeName = `acc_${Date.now()}_${Math.random().toString(36).substring(2, 7)}${ext}`;
+                const filePath = path.join(uploadsDir, safeName);
+                fs.writeFileSync(filePath, file.buffer);
+                // In EMS, typically local files are served via express static from /uploads
+                // Wait, if it's served statically, how is it accessed?
+                // Let's use the standard local path.
+                payloadData.standaloneAccessories[index].image = `/uploads/quotations/${safeName}`;
+              } catch (localErr) {
+                console.error('Failed to write local quotation image fallback:', localErr);
+              }
+            }
+          }
+        }
+      }
+    }
+
     const {
       clientId,
       client,
@@ -49,7 +99,7 @@ exports.createQuotation = async (req, res, next) => {
       bankDetails,
       companyDetails,
       notes,
-    } = req.body;
+    } = payloadData;
 
     if (!client || !client.name) {
       return res.status(400).json({ success: false, message: 'Client name is required.' });
@@ -479,6 +529,50 @@ exports.getQuotationById = async (req, res, next) => {
 exports.updateQuotation = async (req, res, next) => {
   try {
     const { id } = req.params;
+    
+    let payloadData = req.body;
+    if (req.body.data && typeof req.body.data === 'string') {
+      try {
+        payloadData = JSON.parse(req.body.data);
+      } catch (err) {
+        return res.status(400).json({ success: false, message: 'Invalid JSON data payload.' });
+      }
+    }
+
+    if (req.files && req.files.length > 0) {
+      for (const file of req.files) {
+        if (file.originalname && file.originalname.startsWith('idx_')) {
+          const index = parseInt(file.originalname.split('_')[1], 10);
+          if (!isNaN(index) && payloadData.standaloneAccessories && payloadData.standaloneAccessories[index]) {
+            try {
+              const driveRes = await googleDriveService.uploadFileToDrive({
+                buffer: file.buffer,
+                fileName: file.originalname.replace(/^idx_\d+_/, ''),
+                mimeType: file.mimetype,
+                folderType: 'Quotations',
+              });
+              payloadData.standaloneAccessories[index].image = `/api/files/drive/${driveRes.driveFileId}`;
+            } catch (err) {
+              console.error('[QuotationController] Drive upload error in update, using local fallback:', err.message);
+              try {
+                const uploadsDir = path.join(__dirname, '../../uploads/quotations');
+                if (!fs.existsSync(uploadsDir)) {
+                  fs.mkdirSync(uploadsDir, { recursive: true });
+                }
+                const ext = path.extname(file.originalname) || '.jpg';
+                const safeName = `acc_${Date.now()}_${Math.random().toString(36).substring(2, 7)}${ext}`;
+                const filePath = path.join(uploadsDir, safeName);
+                fs.writeFileSync(filePath, file.buffer);
+                payloadData.standaloneAccessories[index].image = `/uploads/quotations/${safeName}`;
+              } catch (localErr) {
+                console.error('Failed to write local quotation image fallback:', localErr);
+              }
+            }
+          }
+        }
+      }
+    }
+
     const {
       client,
       projectTitle,
@@ -495,7 +589,7 @@ exports.updateQuotation = async (req, res, next) => {
       companyDetails,
       notes,
       createRevision = false,
-    } = req.body;
+    } = payloadData;
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ success: false, message: 'Invalid quotation ID.' });

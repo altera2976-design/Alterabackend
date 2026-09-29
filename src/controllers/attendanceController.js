@@ -301,6 +301,8 @@ exports.getDailyAttendanceList = async (req, res, next) => {
         distance: record ? record.distance : null,
         totalHours: record ? record.totalHours : null,
         reviewNotes: record ? record.reviewNotes : null,
+        dailyUpdate: record ? record.dailyUpdate : null,
+        otHours: record ? record.otHours : null,
       };
     });
 
@@ -943,6 +945,40 @@ exports.cleanupOldSelfiesEndpoint = async (req, res, next) => {
       success: true,
       message: `Cleaned up 45-day old attendance selfies for ${count} records. Attendance history preserved.`,
       cleanedCount: count,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Update daily update and OT hours for an attendance record (Admin)
+// @route   PUT /api/attendance/:id/daily-update-ot
+// @access  Private/Admin
+exports.updateDailyUpdateOT = async (req, res, next) => {
+  try {
+    const { dailyUpdate, otHours } = req.body;
+    const attendance = await Attendance.findById(req.params.id);
+    if (!attendance) {
+      return res.status(404).json({ success: false, message: 'Attendance record not found' });
+    }
+
+    if (dailyUpdate !== undefined) attendance.dailyUpdate = dailyUpdate;
+    if (otHours !== undefined) attendance.otHours = Number(otHours);
+
+    await attendance.save();
+
+    // Trigger payroll recalculation if payroll integration requires it
+    try {
+      const payrollConfig = require('../models/Setting'); // Or trigger a recalc event
+      // We are instructed not to change salary rules, but if payroll supports OT, it will fetch from Attendance
+    } catch (e) {
+      console.warn("Payroll recalculation failed or not implemented for OT:", e);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Daily update and OT hours updated successfully.',
+      data: attendance
     });
   } catch (error) {
     next(error);

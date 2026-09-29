@@ -128,6 +128,14 @@ const AttendanceSchema = new mongoose.Schema(
         createdAt: { type: Date, default: Date.now },
       },
     ],
+    dailyUpdate: {
+      type: String,
+      default: '',
+    },
+    otHours: {
+      type: Number,
+      default: 0,
+    },
   },
   {
     timestamps: true,

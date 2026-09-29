@@ -46,8 +46,8 @@ exports.getDashboardStats = async (req, res, next) => {
         bikeDistStats,
         recentAudit,
       ] = await Promise.all([
-        User.countDocuments({ role: 'EMPLOYEE' }),
-        User.countDocuments({ role: 'EMPLOYEE', status: 'ACTIVE' }),
+        User.countDocuments({ role: { $ne: 'SUPER_ADMIN' } }),
+        User.countDocuments({ role: { $ne: 'SUPER_ADMIN' }, status: 'ACTIVE' }),
 
         // 1. Project status breakdown in 1 query
         Project.aggregate([

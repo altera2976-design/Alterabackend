@@ -21,7 +21,8 @@ const generateEmployeeId = async () => {
     }
   }
 
-  let nextNum = maxNum + 1;
+  // If no employee IDs exist (or all are below 100), start at 100.
+  let nextNum = Math.max(100, maxNum + 1);
   let candidate = `EMP-${String(nextNum).padStart(3, "0")}`;
 
   // Safety check: Loop until an unused candidate ID is found

@@ -15,6 +15,7 @@ const {
   updateGeofenceConfig,
   addRemark,
   cleanupOldSelfiesEndpoint,
+  updateDailyUpdateOT,
 } = require("../controllers/attendanceController");
 
 const router = express.Router();
@@ -23,6 +24,7 @@ const router = express.Router();
 router.post("/remarks", protect, addRemark);
 router.post("/:id/remarks", protect, addRemark);
 router.post("/cleanup-selfies", protect, authorize("ADMIN"), cleanupOldSelfiesEndpoint);
+router.put("/:id/daily-update-ot", protect, authorize("ADMIN"), updateDailyUpdateOT);
 
 // ── SELFIE ATTENDANCE ROUTES ───────────────────────────────────────────────
 router.post(
