@@ -209,6 +209,8 @@ exports.login = async (req, res, next) => {
           reports: true,
           administration: true,
         },
+        accessStatus: user.accessStatus,
+        salaryStatus: user.salaryStatus,
         createdAt: user.createdAt,
       },
     });
@@ -444,6 +446,8 @@ exports.updateProfile = async (req, res, next) => {
         salary: user.salary,
         workingHours: user.workingHours,
         status: user.status,
+        accessStatus: user.accessStatus,
+        salaryStatus: user.salaryStatus,
         avatar: user.avatar,
         createdAt: user.createdAt,
       },
@@ -656,6 +660,8 @@ exports.googleLogin = async (req, res, next) => {
         salary: user.salary,
         workingHours: user.workingHours,
         status: user.status,
+        accessStatus: user.accessStatus,
+        salaryStatus: user.salaryStatus,
         createdAt: user.createdAt,
       },
     });

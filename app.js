@@ -108,6 +108,7 @@ app.use("/api/finance", require("./src/routes/financeRoutes"));
 app.use("/api/transactions", require("./src/routes/transactionRoutes"));
 app.use("/api/execution", require("./src/routes/projectExecutionRoutes"));
 app.use("/api/files", require("./src/routes/fileRoutes"));
+app.use("/api/festivals", require("./src/routes/festivalRoutes"));
 
 
 // ── 404 handler ──────────────────────────────────────────────────────────────

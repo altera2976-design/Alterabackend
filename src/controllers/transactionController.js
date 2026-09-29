@@ -273,6 +273,7 @@ exports.createTransaction = async (req, res, next) => {
       status,
       description,
       notes,
+      mobileNumber,
       transactionDate,
     } = req.body;
 
@@ -335,6 +336,7 @@ exports.createTransaction = async (req, res, next) => {
       status: initStatus,
       description: description ? description.trim() : '',
       notes: notes ? notes.trim() : '',
+      mobileNumber: mobileNumber ? mobileNumber.trim() : '',
       transactionDate: transactionDate ? new Date(transactionDate) : new Date(),
       createdBy: req.user?._id,
       createdByName: req.user?.name || 'System',

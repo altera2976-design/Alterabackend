@@ -1,0 +1,57 @@
+services:
+  - type: web
+    name: ems-backend
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 5001
+      - key: MONGODB_URI
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: JWT_EXPIRES_IN
+        value: 7d
+      - key: ADMIN_NAME
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: SMTP_HOST
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: 587
+      - key: SMTP_SECURE
+        value: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: GOOGLE_CLIENT_EMAIL
+        sync: false
+      - key: GOOGLE_PRIVATE_KEY
+        sync: false
+      - key: GOOGLE_DRIVE_ROOT_FOLDER_ID
+        sync: false
+      - key: GOOGLE_DRIVE_TASKS_FOLDER_ID
+        sync: false
+      - key: GOOGLE_DRIVE_ATTENDANCE_FOLDER_ID
+        sync: false
+      - key: GOOGLE_DRIVE_QUOTATIONS_FOLDER_ID
+        sync: false
+      - key: GOOGLE_DRIVE_OFFER_LETTERS_FOLDER_ID
+        sync: false
+      - key: GOOGLE_DRIVE_CRM_FOLDER_ID
+        sync: false
+      - key: GOOGLE_DRIVE_EMPLOYEE_DOCUMENTS_FOLDER_ID
+        sync: false

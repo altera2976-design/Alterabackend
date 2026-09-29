@@ -79,6 +79,11 @@ const TransactionSchema = new mongoose.Schema(
       default: '',
       trim: true,
     },
+    mobileNumber: {
+      type: String,
+      default: '',
+      trim: true,
+    },
     quotationId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Quotation',
