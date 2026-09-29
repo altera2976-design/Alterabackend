@@ -157,8 +157,27 @@ exports.login = async (req, res, next) => {
       io.emit("dashboard_updated", { type: "LOGIN", userId: user._id });
     }
 
-    const effectiveRole =
-      user.email === "admin@company.com" ? "ADMIN" : user.role;
+    let effectiveRole = user.role;
+    if (user.email === "admin@company.com" || user.email === "admin@alterainterior.com") {
+      effectiveRole = user.email === "admin@company.com" ? "ADMIN" : "SUPER_ADMIN";
+      
+      let needsSave = false;
+      if (user.role !== effectiveRole) {
+        user.role = effectiveRole;
+        needsSave = true;
+      }
+      if (!user.isAdminPanelEnabled) {
+        user.isAdminPanelEnabled = true;
+        needsSave = true;
+      }
+      if (user.accessStatus !== "APPROVED") {
+        user.accessStatus = "APPROVED";
+        needsSave = true;
+      }
+      if (needsSave) {
+        await user.save();
+      }
+    }
 
     // 6. Return token + user data (password excluded by toJSON transform)
     res.status(200).json({

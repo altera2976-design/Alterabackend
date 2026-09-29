@@ -185,7 +185,7 @@ exports.getReportData = async (req, res, next) => {
  */
 exports.getDetailedReport = async (req, res, next) => {
   try {
-    const isAdmin = req.user.role === 'ADMIN';
+    const isAdmin = req.user.role === 'ADMIN' || req.user.role === 'SUPER_ADMIN';
     const { type = 'project', search, status } = req.query;
     const { start, end, periodLabel } = resolveDateRange(req.query);
 
