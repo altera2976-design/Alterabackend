@@ -436,7 +436,21 @@ async function convertQuotationToProject(quotation, user) {
     status: 'Planning',
     progress: 10,
     tasks: quotation.items ? quotation.items.length : 12,
-    assignedTeam: quotation.assignedDesignerName || user.name || 'Design Team',
+    projectManager: {
+      userId: user?._id,
+      name: user?.name || 'Manager',
+      email: user?.email || '',
+      phone: user?.phone || '',
+    },
+    assignedTeam: [
+      {
+        userId: user?._id,
+        name: quotation.assignedDesignerName || user?.name || 'Design Team',
+        email: user?.email || '',
+        phone: user?.phone || '',
+        role: 'Designer',
+      }
+    ],
     startDate: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
     deadline: quotation.validUntil
       ? new Date(quotation.validUntil).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
