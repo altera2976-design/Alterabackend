@@ -55,8 +55,8 @@ exports.login = async (req, res, next) => {
         try {
           const initPass = process.env.ADMIN_PASSWORD || cleanPass || "Admin@123456";
           user = await User.create({
-            name: "Altera Super Admin",
-            email: "admin@alterainterior.com",
+            name: process.env.ADMIN_NAME || "Altera Super Admin",
+            email: identifier.includes("@") ? identifier : (process.env.ADMIN_EMAIL || "admin@company.com"),
             password: initPass,
             role: "SUPER_ADMIN",
             status: "ACTIVE",

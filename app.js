@@ -43,6 +43,9 @@ app.use((req, res, next) => {
   console.log(
     `📡 [${new Date().toLocaleTimeString()}] ${req.method} ${req.originalUrl}`,
   );
+  res.on('finish', () => {
+    console.log(`✅ [${new Date().toLocaleTimeString()}] ${req.method} ${req.originalUrl} -> ${res.statusCode}`);
+  });
   next();
 });
 
