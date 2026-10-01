@@ -183,10 +183,8 @@ const checkPermission = (moduleName, action = "view") => {
       }
     }
 
-    // For Admin roles, if modPerms was explicitly undefined, DO NOT allow default. They must be granted explicitly.
-
-    // Default: allow viewing resources for active authenticated users (except ADMIN who must be explicitly granted)
-    if (action === "view" && userRole !== "ADMIN" && !userRole.includes("ADMIN")) {
+    // Default: allow viewing resources for active authenticated users
+    if (action === "view" || action === "viewSummary") {
       return next();
     }
 
