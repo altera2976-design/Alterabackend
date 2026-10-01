@@ -145,11 +145,11 @@ exports.scanQr = async (req, res, next) => {
       });
     }
 
-    // 5. Determine status based on time (Optional: hardcoded late check for 10:00 AM)
+    // 5. Determine status based on time (Late after 9:30 AM)
     let status = 'PRESENT';
     const currentHour = new Date().getHours();
     const currentMin = new Date().getMinutes();
-    if (currentHour > 10 || (currentHour === 10 && currentMin > 15)) {
+    if (currentHour > 9 || (currentHour === 9 && currentMin > 30)) {
       status = 'LATE';
     }
 
@@ -519,12 +519,12 @@ exports.markSelfieAttendance = async (req, res, next) => {
         });
       }
 
-      // Check Late (after 10:15 AM)
+      // Check Late (after 9:30 AM)
       const now = new Date();
       let status = 'PRESENT';
       const currentHour = now.getHours();
       const currentMin = now.getMinutes();
-      if (currentHour > 10 || (currentHour === 10 && currentMin > 15)) {
+      if (currentHour > 9 || (currentHour === 9 && currentMin > 30)) {
         status = 'LATE';
       }
 
