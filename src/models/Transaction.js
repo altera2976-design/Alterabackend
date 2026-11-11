@@ -89,9 +89,21 @@ const TransactionSchema = new mongoose.Schema(
       ref: 'Quotation',
       index: true,
     },
+    quotationRef: {
+      type: String,
+      default: '',
+      trim: true,
+      index: true,
+    },
     invoiceId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Invoice',
+      index: true,
+    },
+    invoiceRef: {
+      type: String,
+      default: '',
+      trim: true,
       index: true,
     },
     transactionType: {

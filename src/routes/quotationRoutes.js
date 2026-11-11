@@ -15,6 +15,7 @@ router.use(protect);
 // Global settings & templates
 router.get('/config', checkPermission('quotation', 'view'), quotationController.getConfig);
 router.put('/config', checkPermission('quotation', 'edit'), quotationController.updateConfig);
+router.post('/config/options', checkPermission('quotation', 'edit'), quotationController.addConfigOption);
 
 // Quotation summary KPIs
 router.get('/summary', checkPermission('quotation', 'view'), quotationController.getQuotationSummary);

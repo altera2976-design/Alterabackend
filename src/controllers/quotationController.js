@@ -1052,6 +1052,8 @@ exports.updateConfig = async (req, res, next) => {
       termsAndConditions,
       defaultMilestones,
       roomCategories,
+      standaloneAccessoryOptions,
+      standaloneHardwareOptions,
       defaultGstPercent,
       defaultHandlingFeePercent,
       defaultDesignFeePercent,
@@ -1065,6 +1067,8 @@ exports.updateConfig = async (req, res, next) => {
       ...(termsAndConditions ? { termsAndConditions } : {}),
       ...(defaultMilestones ? { defaultMilestones } : {}),
       ...(roomCategories ? { roomCategories } : {}),
+      ...(Array.isArray(standaloneAccessoryOptions) ? { standaloneAccessoryOptions } : {}),
+      ...(Array.isArray(standaloneHardwareOptions) ? { standaloneHardwareOptions } : {}),
       ...(defaultGstPercent !== undefined ? { defaultGstPercent: Number(defaultGstPercent) } : {}),
       ...(defaultHandlingFeePercent !== undefined ? { defaultHandlingFeePercent: Number(defaultHandlingFeePercent) } : {}),
       ...(defaultDesignFeePercent !== undefined ? { defaultDesignFeePercent: Number(defaultDesignFeePercent) } : {}),
@@ -1076,9 +1080,64 @@ exports.updateConfig = async (req, res, next) => {
       { new: true, upsert: true }
     );
 
+    // Socket.io Real-time emit to web & mobile apps
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('quotation_config_updated', setting.value);
+    }
+
     res.status(200).json({
       success: true,
       message: 'Quotation settings updated successfully.',
+      data: setting.value,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/quotations/config/options
+ * Append a newly added custom option to global config so all devices & apps sync automatically
+ */
+exports.addConfigOption = async (req, res, next) => {
+  try {
+    const Setting = require('../models/Setting');
+    const { type, option } = req.body;
+    if (!type || !option || !String(option).trim()) {
+      return res.status(400).json({ success: false, message: 'Option type and name are required.' });
+    }
+    const trimmed = String(option).trim();
+    const currentConfig = await getQuotationConfig();
+    const fieldMap = {
+      standaloneAccessory: 'standaloneAccessoryOptions',
+      standaloneHardware: 'standaloneHardwareOptions',
+      roomCategory: 'roomCategories',
+    };
+    const field = fieldMap[type] || type;
+    const currentList = Array.isArray(currentConfig[field]) ? [...currentConfig[field]] : [];
+    if (!currentList.includes(trimmed)) {
+      currentList.push(trimmed);
+    }
+    const updated = {
+      ...currentConfig,
+      [field]: currentList,
+    };
+
+    const setting = await Setting.findOneAndUpdate(
+      { key: 'QUOTATION_CONFIG' },
+      { value: updated },
+      { new: true, upsert: true }
+    );
+
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('quotation_config_updated', setting.value);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Option "${trimmed}" added and synced across all apps.`,
       data: setting.value,
     });
   } catch (error) {

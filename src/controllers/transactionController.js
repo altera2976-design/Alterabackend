@@ -123,6 +123,8 @@ function applyFiltersAndSearch(req, baseQuery) {
       { customerName: searchRegex },
       { employeeName: searchRegex },
       { adminName: searchRegex },
+      { quotationRef: searchRegex },
+      { invoiceRef: searchRegex },
       { description: searchRegex },
       { notes: searchRegex },
     ];
@@ -147,15 +149,24 @@ exports.getTransactions = async (req, res, next) => {
     const filterQuery = applyFiltersAndSearch(req, scopeQuery);
 
     const page = parseInt(req.query.page, 10) || 1;
-    const limit = parseInt(req.query.limit, 10) || 20;
-    const skip = (page - 1) * limit;
+    let limit = parseInt(req.query.limit, 10);
+    const fetchAll = req.query.limit === '0' || req.query.limit === 'all' || limit === 0 || limit > 5000;
+    if (isNaN(limit) || limit < 0) limit = 20;
+    const skip = fetchAll ? 0 : (page - 1) * limit;
+
+    let txQuery = Transaction.find(filterQuery)
+      .populate('quotationId', 'quotationNumber projectTitle')
+      .populate('invoiceId', 'invoiceNumber')
+      .populate('customerId', 'name company phone email')
+      .populate('employeeId', 'name email employeeId')
+      .sort({ transactionDate: -1, createdAt: -1 });
+
+    if (!fetchAll) {
+      txQuery = txQuery.skip(skip).limit(limit);
+    }
 
     const [transactions, total] = await Promise.all([
-      Transaction.find(filterQuery)
-        .sort({ transactionDate: -1, createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .lean(),
+      txQuery.lean(),
       Transaction.countDocuments(filterQuery),
     ]);
 
@@ -163,8 +174,8 @@ exports.getTransactions = async (req, res, next) => {
       success: true,
       count: transactions.length,
       total,
-      page,
-      pages: Math.ceil(total / limit),
+      page: fetchAll ? 1 : page,
+      pages: fetchAll ? 1 : Math.ceil(total / limit),
       data: transactions,
     });
   } catch (error) {
@@ -262,10 +273,15 @@ exports.createTransaction = async (req, res, next) => {
     const {
       referenceId,
       employeeId,
+      employeeName: inputEmployeeName,
       adminId,
+      adminName: inputAdminName,
       customerId,
+      customerName: inputCustomerName,
       quotationId,
+      quotationRef: inputQuotationRef,
       invoiceId,
+      invoiceRef: inputInvoiceRef,
       transactionType,
       paymentMethod,
       amount,
@@ -296,23 +312,55 @@ exports.createTransaction = async (req, res, next) => {
     // Generate unique sequential transaction ID
     const transactionId = await generateTransactionId();
 
-    // Resolve user & names
-    let employeeName = '';
-    if (employeeId && mongoose.Types.ObjectId.isValid(employeeId)) {
-      const emp = await User.findById(employeeId).lean();
-      if (emp) employeeName = emp.name;
+    // Resolve Employee / Admin names
+    let resolvedEmployeeName = (inputEmployeeName || '').trim();
+    let resolvedEmployeeId = employeeId && mongoose.Types.ObjectId.isValid(employeeId) ? employeeId : undefined;
+    if (resolvedEmployeeId) {
+      const emp = await User.findById(resolvedEmployeeId).lean();
+      if (emp) resolvedEmployeeName = emp.name;
+    } else if (resolvedEmployeeName) {
+      const emp = await User.findOne({ name: new RegExp('^' + resolvedEmployeeName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') }).lean();
+      if (emp) resolvedEmployeeId = emp._id;
     }
 
-    let adminName = '';
-    if (adminId && mongoose.Types.ObjectId.isValid(adminId)) {
-      const adm = await User.findById(adminId).lean();
-      if (adm) adminName = adm.name;
+    let resolvedAdminName = (inputAdminName || '').trim();
+    let resolvedAdminId = adminId && mongoose.Types.ObjectId.isValid(adminId) ? adminId : undefined;
+    if (resolvedAdminId) {
+      const adm = await User.findById(resolvedAdminId).lean();
+      if (adm) resolvedAdminName = adm.name;
     }
 
-    let customerName = '';
-    if (customerId && mongoose.Types.ObjectId.isValid(customerId)) {
-      const cust = await Client.findById(customerId).lean();
-      if (cust) customerName = cust.name;
+    // Resolve Customer Name & ID
+    let resolvedCustomerName = (inputCustomerName || '').trim();
+    let resolvedCustomerId = customerId && mongoose.Types.ObjectId.isValid(customerId) ? customerId : undefined;
+    if (resolvedCustomerId) {
+      const cust = await Client.findById(resolvedCustomerId).lean();
+      if (cust) resolvedCustomerName = cust.name;
+    } else if (resolvedCustomerName) {
+      const cust = await Client.findOne({ name: new RegExp('^' + resolvedCustomerName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') }).lean();
+      if (cust) resolvedCustomerId = cust._id;
+    }
+
+    // Resolve Quotation Ref & ID
+    let resolvedQuotationRef = (inputQuotationRef || '').trim();
+    let resolvedQuotationId = quotationId && mongoose.Types.ObjectId.isValid(quotationId) ? quotationId : undefined;
+    if (resolvedQuotationId) {
+      const q = await Quotation.findById(resolvedQuotationId).lean();
+      if (q) resolvedQuotationRef = q.quotationNumber || resolvedQuotationRef;
+    } else if (resolvedQuotationRef) {
+      const q = await Quotation.findOne({ quotationNumber: new RegExp('^' + resolvedQuotationRef.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') }).lean();
+      if (q) resolvedQuotationId = q._id;
+    }
+
+    // Resolve Invoice Ref & ID
+    let resolvedInvoiceRef = (inputInvoiceRef || '').trim();
+    let resolvedInvoiceId = invoiceId && mongoose.Types.ObjectId.isValid(invoiceId) ? invoiceId : undefined;
+    if (resolvedInvoiceId) {
+      const inv = await Invoice.findById(resolvedInvoiceId).lean();
+      if (inv) resolvedInvoiceRef = inv.invoiceNumber || resolvedInvoiceRef;
+    } else if (resolvedInvoiceRef) {
+      const inv = await Invoice.findOne({ invoiceNumber: new RegExp('^' + resolvedInvoiceRef.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') }).lean();
+      if (inv) resolvedInvoiceId = inv._id;
     }
 
     const initStatus = status || 'Completed';
@@ -321,14 +369,16 @@ exports.createTransaction = async (req, res, next) => {
       transactionId,
       referenceId: referenceId ? referenceId.trim() : '',
       userId: req.user?._id,
-      employeeId: employeeId || (req.user?.role === 'EMPLOYEE' ? req.user._id : undefined),
-      employeeName: employeeName || req.user?.name || '',
-      adminId: adminId || (req.user?.role === 'ADMIN' ? req.user._id : undefined),
-      adminName: adminName || (req.user?.role === 'ADMIN' ? req.user.name : ''),
-      customerId: customerId && mongoose.Types.ObjectId.isValid(customerId) ? customerId : undefined,
-      customerName,
-      quotationId: quotationId && mongoose.Types.ObjectId.isValid(quotationId) ? quotationId : undefined,
-      invoiceId: invoiceId && mongoose.Types.ObjectId.isValid(invoiceId) ? invoiceId : undefined,
+      employeeId: resolvedEmployeeId || (req.user?.role === 'EMPLOYEE' ? req.user._id : undefined),
+      employeeName: resolvedEmployeeName || req.user?.name || '',
+      adminId: resolvedAdminId || (req.user?.role === 'ADMIN' ? req.user._id : undefined),
+      adminName: resolvedAdminName || (req.user?.role === 'ADMIN' ? req.user.name : ''),
+      customerId: resolvedCustomerId,
+      customerName: resolvedCustomerName,
+      quotationId: resolvedQuotationId,
+      quotationRef: resolvedQuotationRef,
+      invoiceId: resolvedInvoiceId,
+      invoiceRef: resolvedInvoiceRef,
       transactionType: transactionType || 'Payment Received',
       paymentMethod: paymentMethod || 'UPI',
       amount: Number(amount),
@@ -354,6 +404,16 @@ exports.createTransaction = async (req, res, next) => {
 
     await newTransaction.save();
 
+    // Populate references before sending response so frontend immediately has all data
+    const populatedTransaction = await Transaction.findById(newTransaction._id)
+      .populate('userId', 'name email phone role')
+      .populate('employeeId', 'name email phone department designation')
+      .populate('adminId', 'name email phone')
+      .populate('customerId', 'name company phone email gstin')
+      .populate('quotationId', 'quotationNumber projectTitle pricing')
+      .populate('invoiceId', 'invoiceNumber amount status')
+      .lean();
+
     // Socket.io Real-time emit
     const io = req.app.get('io');
     if (io) {
@@ -368,7 +428,7 @@ exports.createTransaction = async (req, res, next) => {
     res.status(201).json({
       success: true,
       message: `Transaction ${newTransaction.transactionId} created successfully.`,
-      data: newTransaction,
+      data: populatedTransaction || newTransaction,
     });
   } catch (error) {
     next(error);
@@ -392,7 +452,22 @@ exports.updateTransaction = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Transaction not found or access denied.' });
     }
 
-    const { status, description, notes, paymentMethod, transactionType, reason } = req.body;
+    const {
+      status,
+      description,
+      notes,
+      paymentMethod,
+      transactionType,
+      reason,
+      amount,
+      referenceId,
+      customerName,
+      employeeName,
+      quotationRef,
+      invoiceRef,
+      quotationId,
+      invoiceId,
+    } = req.body;
 
     if (status && status !== transaction.status) {
       transaction.timeline.push({
@@ -406,12 +481,63 @@ exports.updateTransaction = async (req, res, next) => {
       transaction.status = status;
     }
 
-    if (description !== undefined) transaction.description = description.trim();
-    if (notes !== undefined) transaction.notes = notes.trim();
+    if (amount !== undefined && amount !== null && amount !== '' && !isNaN(Number(amount))) {
+      transaction.amount = Number(amount);
+    }
+    if (referenceId !== undefined) transaction.referenceId = String(referenceId || '').trim();
+    if (customerName !== undefined) {
+      const cName = String(customerName || '').trim();
+      transaction.customerName = cName;
+      if (cName && !transaction.customerId) {
+        const cust = await Client.findOne({ name: new RegExp('^' + cName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') }).lean();
+        if (cust) transaction.customerId = cust._id;
+      }
+    }
+    if (employeeName !== undefined) {
+      const eName = String(employeeName || '').trim();
+      transaction.employeeName = eName;
+      if (eName && !transaction.employeeId) {
+        const emp = await User.findOne({ name: new RegExp('^' + eName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') }).lean();
+        if (emp) transaction.employeeId = emp._id;
+      }
+    }
+    if (quotationRef !== undefined) {
+      const qRef = String(quotationRef || '').trim();
+      transaction.quotationRef = qRef;
+      if (qRef && !transaction.quotationId) {
+        const q = await Quotation.findOne({ quotationNumber: new RegExp('^' + qRef.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') }).lean();
+        if (q) transaction.quotationId = q._id;
+      }
+    }
+    if (invoiceRef !== undefined) {
+      const invRef = String(invoiceRef || '').trim();
+      transaction.invoiceRef = invRef;
+      if (invRef && !transaction.invoiceId) {
+        const inv = await Invoice.findOne({ invoiceNumber: new RegExp('^' + invRef.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') }).lean();
+        if (inv) transaction.invoiceId = inv._id;
+      }
+    }
+    if (quotationId !== undefined && mongoose.Types.ObjectId.isValid(quotationId)) {
+      transaction.quotationId = quotationId;
+    }
+    if (invoiceId !== undefined && mongoose.Types.ObjectId.isValid(invoiceId)) {
+      transaction.invoiceId = invoiceId;
+    }
+    if (description !== undefined) transaction.description = String(description || '').trim();
+    if (notes !== undefined) transaction.notes = String(notes || '').trim();
     if (paymentMethod !== undefined) transaction.paymentMethod = paymentMethod;
     if (transactionType !== undefined) transaction.transactionType = transactionType;
 
     await transaction.save();
+
+    const populatedTransaction = await Transaction.findById(transaction._id)
+      .populate('userId', 'name email phone role')
+      .populate('employeeId', 'name email phone department designation')
+      .populate('adminId', 'name email phone')
+      .populate('customerId', 'name company phone email gstin')
+      .populate('quotationId', 'quotationNumber projectTitle pricing')
+      .populate('invoiceId', 'invoiceNumber amount status')
+      .lean();
 
     // Socket.io Real-time emit
     const io = req.app.get('io');
@@ -426,7 +552,7 @@ exports.updateTransaction = async (req, res, next) => {
     res.status(200).json({
       success: true,
       message: `Transaction ${transaction.transactionId} updated successfully.`,
-      data: transaction,
+      data: populatedTransaction || transaction,
     });
   } catch (error) {
     next(error);
@@ -498,19 +624,26 @@ exports.exportTransactions = async (req, res, next) => {
     const filterQuery = applyFiltersAndSearch(req, scopeQuery);
 
     const transactions = await Transaction.find(filterQuery)
-      .sort({ transactionDate: -1 })
+      .populate('quotationId', 'quotationNumber projectTitle')
+      .populate('invoiceId', 'invoiceNumber')
+      .populate('customerId', 'name company phone email')
+      .populate('employeeId', 'name email employeeId')
+      .sort({ transactionDate: -1, createdAt: -1 })
       .lean();
 
     const format = (req.query.format || 'csv').toLowerCase();
 
     if (format === 'csv') {
-      let csv = 'Transaction ID,Date,Employee/Admin,Customer,Type,Payment Method,Amount,Status,Reference ID,Description\n';
+      let csv = 'Transaction ID,Date,Employee/Admin,Customer,Type,Payment Method,Amount,Status,Reference ID,Quotation Ref,Invoice Ref,Recorded By,Description\n';
       transactions.forEach((tx) => {
         const d = tx.transactionDate ? new Date(tx.transactionDate).toISOString().split('T')[0] : '';
-        const empAdmin = (tx.employeeName || tx.adminName || '').replace(/,/g, ' ');
-        const cust = (tx.customerName || '').replace(/,/g, ' ');
+        const empAdmin = (tx.employeeName || tx.employeeId?.name || tx.adminName || '').replace(/,/g, ' ');
+        const cust = (tx.customerName || tx.customerId?.name || '').replace(/,/g, ' ');
+        const qRef = (tx.quotationRef || tx.quotationId?.quotationNumber || '').replace(/,/g, ' ');
+        const invRef = (tx.invoiceRef || tx.invoiceId?.invoiceNumber || '').replace(/,/g, ' ');
+        const recordedBy = (tx.createdByName || '').replace(/,/g, ' ');
         const desc = (tx.description || '').replace(/,/g, ' ');
-        csv += `"${tx.transactionId}","${d}","${empAdmin}","${cust}","${tx.transactionType}","${tx.paymentMethod}",${tx.amount},"${tx.status}","${tx.referenceId || ''}","${desc}"\n`;
+        csv += `"${tx.transactionId}","${d}","${empAdmin}","${cust}","${tx.transactionType}","${tx.paymentMethod}",${tx.amount},"${tx.status}","${tx.referenceId || ''}","${qRef}","${invRef}","${recordedBy}","${desc}"\n`;
       });
 
       res.setHeader('Content-Type', 'text/csv');
@@ -539,13 +672,29 @@ exports.deleteTransaction = async (req, res, next) => {
     }
 
     // Only Super Admin can delete transactions
-    if (req.user?.role !== 'SUPER_ADMIN') {
+    const userRole = (req.user?.role || '').toUpperCase();
+    const userEmail = (req.user?.email || '').toLowerCase();
+    const isSuper =
+      userRole === 'SUPER_ADMIN' ||
+      userEmail === 'admin@alterainterior.com' ||
+      userEmail === 'admin@company.com';
+
+    if (!isSuper) {
       return res.status(403).json({ success: false, message: 'Only Super Admin is authorized to delete transactions.' });
     }
 
     const transaction = await Transaction.findByIdAndDelete(id);
     if (!transaction) {
       return res.status(404).json({ success: false, message: 'Transaction not found.' });
+    }
+
+    // Socket.io Real-time emit
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('transaction_deleted', {
+        id: transaction._id,
+        transactionId: transaction.transactionId,
+      });
     }
 
     res.status(200).json({

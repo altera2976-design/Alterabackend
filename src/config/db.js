@@ -1,7 +1,27 @@
 const mongoose = require("mongoose");
+const dns = require("dns");
+
+// Use reliable public DNS resolvers to prevent Windows / ISP SRV record failures
+try {
+  dns.setServers(["8.8.8.8", "8.8.4.4", "1.1.1.1"]);
+} catch {
+  // Use system resolver if setServers fails
+}
 
 const connectDB = async () => {
-  const uri = process.env.MONGODB_URI;
+  let uri = (process.env.MONGODB_URI || "").trim();
+
+  // Strip duplicate key prefix if accidentally pasted as "MONGODB_URI=mongodb+srv://..."
+  if (uri.startsWith("MONGODB_URI=")) {
+    uri = uri.replace(/^MONGODB_URI=/, "").trim();
+  }
+  // Strip surrounding quotes if present
+  if (
+    (uri.startsWith('"') && uri.endsWith('"')) ||
+    (uri.startsWith("'") && uri.endsWith("'"))
+  ) {
+    uri = uri.slice(1, -1).trim();
+  }
 
   // ── Safe diagnostic (no secrets printed) ─────────────────────────────────
   console.log("");
@@ -84,8 +104,12 @@ const connectDB = async () => {
     ) {
       console.error("❌ MongoDB DNS FAILURE — cluster hostname not found.");
       console.error(
-        "   Fix: Check the hostname in MONGODB_URI (e.g. react.d5wl2.mongodb.net).",
+        "   The hostname in MONGODB_URI does not exist or cannot be resolved by DNS.",
       );
+      console.error("   To fix this in MongoDB Atlas (https://cloud.mongodb.com):");
+      console.error("   1. Check if your cluster is PAUSED. If paused, click 'Resume'.");
+      console.error("   2. Click 'Connect' -> 'Drivers' -> copy the fresh connection string.");
+      console.error("   3. Verify for any mistyped letters in the cluster hostname.");
     } else if (msg.includes("ETIMEDOUT") || msg.includes("timeout")) {
       console.error(
         "❌ MongoDB TIMEOUT — cluster unreachable or IP not whitelisted.",

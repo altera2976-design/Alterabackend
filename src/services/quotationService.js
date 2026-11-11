@@ -47,6 +47,27 @@ const DEFAULT_ROOM_CATEGORIES = [
   'Other',
 ];
 
+const DEFAULT_STANDALONE_ACCESSORY_OPTIONS = [
+  'Soft Close Hinges',
+  'Cutlery Basket',
+  'Drawer Channel',
+  'Bottle Pull-Out',
+  'Tandem Box',
+  'Magic Corner',
+  'Wardrobe Accessories',
+  'Kitchen Accessories',
+  'Other Accessories',
+];
+
+const DEFAULT_STANDALONE_HARDWARE_OPTIONS = [
+  'Hettich Soft Close',
+  'Hafele Soft Close',
+  'Ebco Soft Close',
+  'Blum',
+  'Godrej',
+  'Other Hardware',
+];
+
 const DEFAULT_COMPANY_DETAILS = {
   name: 'Altera Interior',
   tagline: 'The Modern Home Maker • Interior | Architect | Construction',
@@ -159,6 +180,8 @@ async function getQuotationConfig() {
         termsAndConditions: DEFAULT_TERMS,
         defaultMilestones: DEFAULT_MILESTONES,
         roomCategories: DEFAULT_ROOM_CATEGORIES,
+        standaloneAccessoryOptions: DEFAULT_STANDALONE_ACCESSORY_OPTIONS,
+        standaloneHardwareOptions: DEFAULT_STANDALONE_HARDWARE_OPTIONS,
         defaultGstPercent: 18,
         defaultHandlingFeePercent: 2,
         defaultDesignFeePercent: 2,
@@ -168,6 +191,12 @@ async function getQuotationConfig() {
   } else {
     setting.value.companyDetails = DEFAULT_COMPANY_DETAILS;
     setting.value.bankDetails = DEFAULT_BANK_DETAILS;
+    if (!Array.isArray(setting.value.standaloneAccessoryOptions) || setting.value.standaloneAccessoryOptions.length === 0) {
+      setting.value.standaloneAccessoryOptions = DEFAULT_STANDALONE_ACCESSORY_OPTIONS;
+    }
+    if (!Array.isArray(setting.value.standaloneHardwareOptions) || setting.value.standaloneHardwareOptions.length === 0) {
+      setting.value.standaloneHardwareOptions = DEFAULT_STANDALONE_HARDWARE_OPTIONS;
+    }
     setting.markModified('value');
     await setting.save();
   }
