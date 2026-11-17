@@ -56,8 +56,10 @@ app.use(
   }),
 );
 
-// ── Static uploaded files (selfies, documents) ──────────────────────────────
+// ── Static uploaded files (selfies, documents) & public assets ────────────────
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+app.use("/hardware-accessories", express.static(path.join(__dirname, "public/hardware-accessories")));
+app.use(express.static(path.join(__dirname, "public")));
 
 // ── Body parsers ─────────────────────────────────────────────────────────────
 // Allow 25mb for image and document upload endpoints, default 100kb for standard JSON API requests
