@@ -167,6 +167,8 @@ const QuotationSchema = new mongoose.Schema(
         name: { type: String, required: true, trim: true },
         description: { type: String, default: '', trim: true },
         image: { type: String, default: '' },
+        images: [{ type: String, default: '' }],
+        imageId: { type: String, default: '' },
         quantity: { type: Number, default: 1, min: 0 },
         unit: { type: String, default: 'Pcs', trim: true },
         price: { type: Number, default: 0, min: 0 },

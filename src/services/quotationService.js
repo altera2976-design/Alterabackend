@@ -299,10 +299,15 @@ function calculateQuotationPricing(items = [], pricingOptions = {}, milestones =
         const price = Number(acc.price) >= 0 ? Number(acc.price) : 0;
         const total = Math.round(qty * price);
         standaloneAccessoriesTotal += total;
+        const rawImages = Array.isArray(acc.images) && acc.images.length > 0
+          ? acc.images.filter(Boolean)
+          : (acc.image ? [acc.image] : []);
         return {
           name: (acc.name || '').trim(),
           description: (acc.description || '').trim(),
-          image: acc.image || '',
+          image: acc.image || (rawImages[0] || ''),
+          images: rawImages,
+          imageId: acc.imageId || '',
           quantity: qty,
           unit: (acc.unit || 'Pcs').trim(),
           price,
