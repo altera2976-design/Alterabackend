@@ -1,121 +1,111 @@
-const nodemailer = require("nodemailer");
-
-let cachedTransporter = null;
-
 /**
- * Get or initialize nodemailer transporter.
- * If SMTP_USER & SMTP_PASS are provided in .env, uses standard SMTP.
- * Otherwise, falls back gracefully to an Ethereal test account or mock transport.
+ * emailService.js — Resend HTTPS API (replaces Nodemailer SMTP)
+ *
+ * Why: Render Free Plan blocks outbound SMTP ports 25, 465, 587.
+ *      Resend uses HTTPS (port 443) which is never blocked.
+ *
+ * Required env vars:
+ *   RESEND_API_KEY  — from https://resend.com/api-keys
+ *   EMAIL_FROM      — e.g. "Altera Interior <noreply@alterainterior.com>"
+ *                     (domain must be verified in Resend dashboard)
+ *                     For initial testing use: "onboarding@resend.dev"
  */
-async function getTransporter() {
-  if (cachedTransporter) {
-    return cachedTransporter;
-  }
 
-  const hasCredentials = Boolean(
-    process.env.SMTP_USER && process.env.SMTP_PASS,
-  );
+const { Resend } = require("resend");
 
-  if (hasCredentials) {
-    const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST || "smtp.gmail.com",
-      port: parseInt(process.env.SMTP_PORT || "587", 10),
-      secure: process.env.SMTP_SECURE === "true",
-      connectionTimeout: 5000,
-      greetingTimeout: 5000,
-      socketTimeout: 5000,
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-    });
-
-    try {
-      await Promise.race([
-        transporter.verify(),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("SMTP connection timeout")), 4000),
-        ),
-      ]);
-      console.log("✅ SMTP Server is ready to send messages");
-    } catch (error) {
-      console.warn(
-        "⚠️ SMTP Verification warning/timeout, fallback to mock transport:",
-        error.message,
+// Lazy client — instantiated only when first send is attempted.
+// This prevents a startup crash when RESEND_API_KEY is not yet configured.
+let _resendClient = null;
+function getResend() {
+  if (!_resendClient) {
+    if (!process.env.RESEND_API_KEY) {
+      throw new Error(
+        "RESEND_API_KEY is not set. Add it to your .env / Render environment variables.",
       );
     }
-
-    cachedTransporter = transporter;
-    return cachedTransporter;
+    _resendClient = new Resend(process.env.RESEND_API_KEY);
   }
-
-  // Development fallback: Fast JSON / stream transport that logs email details instantly
-  cachedTransporter = nodemailer.createTransport({
-    jsonTransport: true,
-  });
-  console.log(
-    "ℹ️ Development mailer initialized with instant mock JSON transport",
-  );
-  return cachedTransporter;
+  return _resendClient;
 }
 
-// Check SMTP configuration on module load without throwing "Missing credentials for PLAIN"
-if (process.env.SMTP_USER && process.env.SMTP_PASS) {
-  getTransporter().catch((err) =>
-    console.error("SMTP initialization error:", err.message),
-  );
-} else {
-  console.log(
-    "ℹ️ SMTP credentials not configured in .env. Development test mailer will be used.",
-  );
-}
+const FROM_ADDRESS =
+  process.env.EMAIL_FROM ||
+  '"Altera Interior" <noreply@alterainterior.com>';
+
+// ─── Internal helper ────────────────────────────────────────────────────────
 
 /**
- * Send an email verification link
+ * Sends a single email via Resend HTTPS API.
+ * Returns { success, messageId } or throws on error.
+ * Never logs actual OTP values or API keys.
+ */
+async function _send({ from, to, cc, subject, html, attachments }) {
+  const payload = {
+    from: from || FROM_ADDRESS,
+    to: Array.isArray(to) ? to : [to],
+    subject,
+    html,
+  };
+  if (cc) payload.cc = Array.isArray(cc) ? cc : [cc];
+  if (attachments && attachments.length > 0) {
+    payload.attachments = attachments.map((att) => ({
+      filename: att.filename,
+      content:
+        typeof att.content === "string"
+          ? Buffer.from(att.content, att.encoding || "base64")
+          : att.content,
+    }));
+  }
+
+  const { data, error } = await getResend().emails.send(payload);
+  if (error) {
+    throw new Error(`Resend API error: ${error.message || JSON.stringify(error)}`);
+  }
+  return { success: true, messageId: data?.id };
+}
+
+// ─── Public functions (same signatures as before) ───────────────────────────
+
+/**
+ * Send an email verification link on registration.
  */
 const sendVerificationEmail = async (to, name, token) => {
   const appUrl = process.env.APP_URL || "http://localhost:5001";
   const verificationLink = `${appUrl}/api/auth/verify-email?token=${token}`;
 
-  const mailOptions = {
-    from: process.env.EMAIL_FROM || '"EMS App" <noreply@company.com>',
-    to,
-    subject: "Please verify your email address",
-    html: `
-      <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; border: 1px solid #ddd; border-radius: 8px;">
-        <h2 style="color: #D60000; text-align: center;">Welcome to EMS, ${name}!</h2>
-        <p>Thank you for registering. To complete your account setup and access the application, please verify your email address by clicking the button below.</p>
-        <div style="text-align: center; margin: 30px 0;">
-          <a href="${verificationLink}" style="background-color: #D60000; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">Verify Email</a>
-        </div>
-        <p>If the button doesn't work, copy and paste this link into your browser:</p>
-        <p style="word-break: break-all; color: #555;">
-          <a href="${verificationLink}">${verificationLink}</a>
-        </p>
-        <p>This link will expire in 24 hours.</p>
-        <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;" />
-        <p style="font-size: 12px; color: #888; text-align: center;">If you did not request this, please ignore this email.</p>
+  const html = `
+    <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; border: 1px solid #ddd; border-radius: 8px;">
+      <h2 style="color: #D60000; text-align: center;">Welcome to EMS, ${name}!</h2>
+      <p>Thank you for registering. To complete your account setup and access the application, please verify your email address by clicking the button below.</p>
+      <div style="text-align: center; margin: 30px 0;">
+        <a href="${verificationLink}" style="background-color: #D60000; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">Verify Email</a>
       </div>
-    `,
-  };
+      <p>If the button doesn't work, copy and paste this link into your browser:</p>
+      <p style="word-break: break-all; color: #555;">
+        <a href="${verificationLink}">${verificationLink}</a>
+      </p>
+      <p>This link will expire in 24 hours.</p>
+      <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;" />
+      <p style="font-size: 12px; color: #888; text-align: center;">If you did not request this, please ignore this email.</p>
+    </div>
+  `;
 
   try {
-    const transporter = await getTransporter();
-    const info = await transporter.sendMail(mailOptions);
-    console.log(`Verification email sent to ${to}`);
-    const previewUrl = nodemailer.getTestMessageUrl(info);
-    if (previewUrl) {
-      console.log(`🔗 Verification Email Preview: ${previewUrl}`);
-    }
+    const result = await _send({
+      to,
+      subject: "Please verify your email address",
+      html,
+    });
+    console.log("✅ Verification email sent. MessageId:", result.messageId);
     return true;
   } catch (error) {
-    console.error("Error sending email:", error);
+    console.error("❌ Error sending verification email:", error.message);
     return false;
   }
 };
 
 /**
- * Send an email with report attachments
+ * Send an email with report attachments.
  */
 const sendReportEmail = async ({
   to,
@@ -125,32 +115,19 @@ const sendReportEmail = async ({
   period,
   attachments = [],
 }) => {
-  const recipients = Array.isArray(to) ? to.join(", ") : to;
+  const recipients = Array.isArray(to) ? to : [to];
 
   const html = `
     <div style="font-family: 'Segoe UI', Arial, sans-serif; padding: 24px; max-width: 650px; margin: 0 auto; background-color: #ffffff; border: 1px solid #e5e5e5; border-radius: 12px;">
       <div style="text-align: center; border-bottom: 2px solid #7A131A; padding-bottom: 16px; margin-bottom: 20px;">
         <h1 style="color: #7A131A; margin: 0; font-size: 24px; letter-spacing: 1px;">ALTERA INTERIOR</h1>
-        <p style="color: #666666; margin: 4px 0 0 0; font-size: 13px;">The Modern Home Maker</p>
+        <p style="color: #666666; margin: 4px 0 0 0; font-size: 13px;">The Modern Home Maker • Report</p>
       </div>
-
-      <div style="margin-bottom: 24px;">
-        <h2 style="color: #111111; font-size: 18px; margin-bottom: 8px;">${subject || "Performance & Activity Report"}</h2>
-        <p style="color: #555555; font-size: 14px; line-height: 1.6; margin: 0;">
-          ${message ? message.replace(/\n/g, "<br/>") : "Please find attached the official report generated from the Altera Interior Management System."}
-        </p>
-      </div>
-
-      <div style="background-color: #F8F9FA; border-radius: 8px; padding: 14px 18px; margin-bottom: 24px; border-left: 4px solid #7A131A;">
-        <p style="margin: 0 0 6px 0; font-size: 13px; color: #555;"><strong>Report Type:</strong> ${(reportType || "General").toUpperCase()} REPORT</p>
-        <p style="margin: 0 0 6px 0; font-size: 13px; color: #555;"><strong>Reporting Period:</strong> ${period || "Current Period"}</p>
-        <p style="margin: 0; font-size: 13px; color: #555;"><strong>Generated Date:</strong> ${new Date().toLocaleString("en-IN")}</p>
-      </div>
-
+      <h2 style="color: #111111; font-size: 18px; margin-bottom: 8px;">${reportType} Report — ${period}</h2>
+      <p style="color: #555555; font-size: 14px; line-height: 1.6;">${message ? message.replace(/\n/g, "<br/>") : "Please find the requested report attached."}</p>
       <p style="font-size: 13px; color: #777777; line-height: 1.5;">
         The requested report file is attached to this email. You can open, download, or import it into your financial software.
       </p>
-
       <hr style="border: none; border-top: 1px solid #eeeeee; margin: 24px 0 16px 0;" />
       <p style="font-size: 11px; color: #999999; text-align: center; margin: 0;">
         © ${new Date().getFullYear()} Altera Interior. All rights reserved. This is an automated email from your EMS application.
@@ -158,44 +135,26 @@ const sendReportEmail = async ({
     </div>
   `;
 
-  const mailOptions = {
-    from:
-      process.env.EMAIL_FROM ||
-      '"Altera Interior" <reports@alterainterior.com>',
-    to: recipients,
-    subject: subject || `[Altera Interior] ${reportType} Report - ${period}`,
-    html,
-    attachments: attachments.map((att) => ({
-      filename: att.filename,
-      content:
-        typeof att.content === "string"
-          ? Buffer.from(att.content, att.encoding || "base64")
-          : att.content,
-      contentType: att.contentType,
-    })),
-  };
-
   try {
-    const activeTransporter = await getTransporter();
-    const info = await activeTransporter.sendMail(mailOptions);
-    console.log(
-      `✅ Report email sent successfully to ${recipients}. MessageId: ${info.messageId}`,
-    );
-
-    const previewUrl = nodemailer.getTestMessageUrl(info);
-    if (previewUrl) {
-      console.log(`🔗 Preview Email: ${previewUrl}`);
-    }
-
-    return { success: true, messageId: info.messageId, previewUrl };
+    const result = await _send({
+      from:
+        process.env.EMAIL_FROM ||
+        '"Altera Interior" <reports@alterainterior.com>',
+      to: recipients,
+      subject: subject || `[Altera Interior] ${reportType} Report - ${period}`,
+      html,
+      attachments,
+    });
+    console.log("✅ Report email sent successfully. MessageId:", result.messageId);
+    return { success: true, messageId: result.messageId };
   } catch (error) {
-    console.error("❌ Error sending report email:", error);
+    console.error("❌ Error sending report email:", error.message);
     throw error;
   }
 };
 
 /**
- * Send an email with a payslip attachment
+ * Send an email with a payslip attachment.
  */
 const sendPayslipEmail = async ({
   to,
@@ -206,7 +165,7 @@ const sendPayslipEmail = async ({
   customMessage,
   attachments = [],
 }) => {
-  const recipients = Array.isArray(to) ? to.join(", ") : to;
+  const recipients = Array.isArray(to) ? to : [to];
   const formattedSalary = new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: "INR",
@@ -257,40 +216,26 @@ const sendPayslipEmail = async ({
     </div>
   `;
 
-  const mailOptions = {
-    from:
-      process.env.EMAIL_FROM || '"Altera Payroll" <payroll@alterainterior.com>',
-    to: recipients,
-    subject: `[Altera Interior] Payslip for ${month} - ${employeeName}`,
-    html,
-    attachments: attachments.map((att) => ({
-      filename: att.filename,
-      content:
-        typeof att.content === "string"
-          ? Buffer.from(att.content, att.encoding || "base64")
-          : att.content,
-      contentType: att.contentType || "application/pdf",
-    })),
-  };
-
   try {
-    const activeTransporter = await getTransporter();
-    const info = await activeTransporter.sendMail(mailOptions);
-    console.log(
-      `✅ Payslip email sent successfully to ${recipients}. MessageId: ${info.messageId}`,
-    );
-    const previewUrl = nodemailer.getTestMessageUrl(info);
-    if (previewUrl) console.log(`🔗 Preview Payslip Email: ${previewUrl}`);
-
-    return { success: true, messageId: info.messageId, previewUrl };
+    const result = await _send({
+      from:
+        process.env.EMAIL_FROM ||
+        '"Altera Payroll" <payroll@alterainterior.com>',
+      to: recipients,
+      subject: `[Altera Interior] Payslip for ${month} - ${employeeName}`,
+      html,
+      attachments,
+    });
+    console.log("✅ Payslip email sent successfully. MessageId:", result.messageId);
+    return { success: true, messageId: result.messageId };
   } catch (error) {
-    console.error("❌ Error sending payslip email:", error);
+    console.error("❌ Error sending payslip email:", error.message);
     throw error;
   }
 };
 
 /**
- * Send an email with a quotation PDF attachment
+ * Send an email with a quotation PDF attachment.
  */
 const sendQuotationEmail = async ({
   to,
@@ -303,12 +248,8 @@ const sendQuotationEmail = async ({
   message,
   attachments = [],
 }) => {
-  const recipients = Array.isArray(to) ? to.join(", ") : to;
-  const ccRecipients = cc
-    ? Array.isArray(cc)
-      ? cc.join(", ")
-      : cc
-    : undefined;
+  const recipients = Array.isArray(to) ? to : [to];
+  const ccRecipients = cc ? (Array.isArray(cc) ? cc : [cc]) : undefined;
   const formattedTotal = new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: "INR",
@@ -350,8 +291,7 @@ const sendQuotationEmail = async ({
 
       ${
         publicUrl
-          ? `
-      <div style="text-align: center; margin: 25px 0;">
+          ? `<div style="text-align: center; margin: 25px 0;">
         <a href="${publicUrl}" style="background-color: #7A131A; color: #ffffff; padding: 12px 28px; text-decoration: none; border-radius: 6px; font-weight: 700; font-size: 14px; display: inline-block;">
           View &amp; Approve Quotation Online
         </a>
@@ -370,79 +310,115 @@ const sendQuotationEmail = async ({
     </div>
   `;
 
-  const mailOptions = {
-    from:
-      process.env.EMAIL_FROM ||
-      '"Altera Interior" <quotations@alterainterior.com>',
-    to: recipients,
-    ...(ccRecipients ? { cc: ccRecipients } : {}),
-    subject: `[Altera Interior] Quotation ${quotationNumber} - ${projectTitle || "Interior Proposal"}`,
-    html,
-    attachments: attachments.map((att) => ({
-      filename: att.filename,
-      content:
-        typeof att.content === "string"
-          ? Buffer.from(att.content, att.encoding || "base64")
-          : att.content,
-      contentType: att.contentType || "application/pdf",
-    })),
-  };
-
   try {
-    const activeTransporter = await getTransporter();
-    const info = await activeTransporter.sendMail(mailOptions);
-    console.log(
-      `✅ Quotation email sent successfully to ${recipients}. MessageId: ${info.messageId}`,
-    );
-    const previewUrl = nodemailer.getTestMessageUrl(info);
-    if (previewUrl) console.log(`🔗 Preview Quotation Email: ${previewUrl}`);
-
-    return { success: true, messageId: info.messageId, previewUrl };
+    const result = await _send({
+      from:
+        process.env.EMAIL_FROM ||
+        '"Altera Interior" <quotations@alterainterior.com>',
+      to: recipients,
+      cc: ccRecipients,
+      subject: `[Altera Interior] Quotation ${quotationNumber} - ${projectTitle || "Interior Proposal"}`,
+      html,
+      attachments,
+    });
+    console.log("✅ Quotation email sent successfully. MessageId:", result.messageId);
+    return { success: true, messageId: result.messageId };
   } catch (error) {
-    console.error("❌ Error sending quotation email:", error);
+    console.error("❌ Error sending quotation email:", error.message);
     throw error;
   }
 };
 
 /**
- * Send an email with a 6-digit OTP for password reset
+ * Send an email with a 6-digit OTP for password reset.
+ * NOTE: The `otp` parameter is the plaintext OTP for display only.
+ *       It is never logged here. Hashing happens in authController.
  */
 const sendPasswordResetOtp = async (to, otp) => {
   const html = `
-    <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; border: 1px solid #ddd; border-radius: 8px;">
-      <h2 style="color: #D60000; text-align: center;">Password Reset Request</h2>
-      <p>We received a request to reset your password for your EMS account.</p>
-      <p>Your verification code is:</p>
-      <div style="text-align: center; margin: 30px 0;">
-        <h1 style="color: #D60000; letter-spacing: 5px; font-size: 36px; margin: 0;">${otp}</h1>
+    <div style="font-family: 'Segoe UI', Arial, sans-serif; padding: 24px; max-width: 600px; margin: 0 auto; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px;">
+      <div style="text-align: center; border-bottom: 2px solid #7A131A; padding-bottom: 16px; margin-bottom: 20px;">
+        <h1 style="color: #7A131A; margin: 0; font-size: 24px; letter-spacing: 1px;">ALTERA INTERIOR</h1>
+        <p style="color: #666666; margin: 4px 0 0 0; font-size: 13px;">Password Recovery Verification</p>
       </div>
-      <p>This code is valid for 10 minutes. If you did not request this, please ignore this email.</p>
-      <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;" />
-      <p style="font-size: 12px; color: #888; text-align: center;">If you did not request this, please ignore this email.</p>
+      <h2 style="color: #111111; font-size: 18px; margin-bottom: 12px; text-align: center;">Your Password Reset Code</h2>
+      <p style="color: #444444; font-size: 14px; line-height: 1.6; text-align: center;">We received a request to reset your password. Use the verification code below to proceed:</p>
+      <div style="text-align: center; margin: 28px 0; background-color: #FFF5F5; border: 1px solid #FEB2B2; border-radius: 8px; padding: 18px;">
+        <span style="color: #7A131A; letter-spacing: 8px; font-size: 38px; font-weight: 800; font-family: monospace;">${otp}</span>
+      </div>
+      <p style="color: #666666; font-size: 13px; line-height: 1.5; text-align: center;">
+        ⏰ <strong>This code is valid for 5 minutes.</strong> For your security, do not share this code with anyone.
+      </p>
+      <hr style="border: none; border-top: 1px solid #eeeeee; margin: 24px 0 16px 0;" />
+      <p style="font-size: 12px; color: #888888; text-align: center; margin: 0;">
+        If you did not request a password reset, please ignore this email or contact your administrator immediately.
+      </p>
     </div>
   `;
 
-  const mailOptions = {
-    from: process.env.EMAIL_FROM || '"EMS App" <noreply@company.com>',
-    to,
-    subject: "Password Reset Verification Code",
-    html,
-  };
-
   try {
-    const activeTransporter = await getTransporter();
-    const info = await activeTransporter.sendMail(mailOptions);
-    console.log(
-      `✅ Password reset OTP sent to ${to}. MessageId: ${info.messageId}`,
-    );
-
-    const previewUrl = nodemailer.getTestMessageUrl(info);
-    if (previewUrl) {
-      console.log(`🔗 Preview OTP Email: ${previewUrl}`);
-    }
+    const result = await _send({
+      from:
+        process.env.EMAIL_FROM ||
+        '"Altera Interior" <noreply@alterainterior.com>',
+      to,
+      subject: "Your Password Reset Verification Code",
+      html,
+    });
+    console.log("✅ Password reset OTP email sent. MessageId:", result.messageId);
     return true;
   } catch (error) {
-    console.error("❌ Error sending password reset email:", error);
+    console.error("❌ Error sending password reset OTP email:", error.message);
+    return false;
+  }
+};
+
+/**
+ * Send password-changed security confirmation email.
+ */
+const sendPasswordResetConfirmation = async (to, name) => {
+  const resetTime = new Date().toLocaleString("en-IN");
+
+  const html = `
+    <div style="font-family: 'Segoe UI', Arial, sans-serif; padding: 24px; max-width: 600px; margin: 0 auto; background-color: #ffffff; border: 1px solid #e5e5e5; border-radius: 12px;">
+      <div style="text-align: center; border-bottom: 2px solid #7A131A; padding-bottom: 16px; margin-bottom: 20px;">
+        <h1 style="color: #7A131A; margin: 0; font-size: 24px; letter-spacing: 1px;">ALTERA INTERIOR</h1>
+        <p style="color: #666666; margin: 4px 0 0 0; font-size: 13px;">Security Notification</p>
+      </div>
+      <h2 style="color: #111111; font-size: 18px; margin-bottom: 12px; text-align: center;">Password Changed Successfully</h2>
+      <p style="color: #444444; font-size: 14px; line-height: 1.6;">
+        Hello${name ? " <strong>" + name + "</strong>" : ""},
+      </p>
+      <p style="color: #555555; font-size: 14px; line-height: 1.6;">
+        Your account password has been changed successfully. If you made this change, no further action is required.
+      </p>
+      <div style="background-color: #F8FAFC; border-left: 4px solid #7A131A; padding: 16px; margin: 24px 0; border-radius: 4px;">
+        <p style="margin: 0 0 4px 0; font-size: 13px; color: #333333;"><strong>Time:</strong> ${resetTime}</p>
+        <p style="margin: 4px 0 0 0; font-size: 13px; color: #333333;"><strong>Status:</strong> Completed</p>
+      </div>
+      <p style="color: #D60000; font-size: 13px; line-height: 1.5; font-weight: 600;">
+        ⚠️ If you did NOT initiate this password reset, please contact your System Administrator immediately to secure your account.
+      </p>
+      <hr style="border: none; border-top: 1px solid #eeeeee; margin: 24px 0 16px 0;" />
+      <p style="font-size: 11px; color: #999999; text-align: center; margin: 0;">
+        © ${new Date().getFullYear()} Altera Interior. All rights reserved.
+      </p>
+    </div>
+  `;
+
+  try {
+    const result = await _send({
+      from:
+        process.env.EMAIL_FROM ||
+        '"Altera Interior" <noreply@alterainterior.com>',
+      to,
+      subject: "Security Alert: Password Changed Successfully",
+      html,
+    });
+    console.log("✅ Password reset confirmation sent. MessageId:", result.messageId);
+    return true;
+  } catch (error) {
+    console.error("❌ Error sending password reset confirmation email:", error.message);
     return false;
   }
 };
@@ -450,7 +426,7 @@ const sendPasswordResetOtp = async (to, otp) => {
 const { COMPANY_LOGO_DATA_URL } = require("../constants/companyLogo");
 
 /**
- * Send Offer Letter Email to Candidate
+ * Send Offer Letter Email to Candidate.
  */
 const sendOfferLetterEmail = async ({
   to,
@@ -473,7 +449,7 @@ const sendOfferLetterEmail = async ({
       </p>
 
       <p style="font-size: 15px; color: #334155; line-height: 1.6;">
-        We are delighted to offer you the position of <strong>${designation}</strong> at <strong>Altera Interior</strong>! 
+        We are delighted to offer you the position of <strong>${designation}</strong> at <strong>Altera Interior</strong>!
         Your expected joining date is <strong>${joiningDate}</strong>.
       </p>
 
@@ -492,13 +468,11 @@ const sendOfferLetterEmail = async ({
 
       ${
         publicUrl
-          ? `
-      <div style="text-align: center; margin: 30px 0;">
+          ? `<div style="text-align: center; margin: 30px 0;">
         <a href="${publicUrl}" target="_blank" style="background-color: #9F0B22; color: #FFFFFF; padding: 12px 28px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 14px; display: inline-block;">
-          View & Respond Online
+          View &amp; Respond Online
         </a>
-      </div>
-      `
+      </div>`
           : ""
       }
 
@@ -509,34 +483,24 @@ const sendOfferLetterEmail = async ({
     </div>
   `;
 
-  const mailOptions = {
-    from: process.env.EMAIL_FROM || '"Altera HR" <hr@alterainterior.com>',
-    to,
-    subject: `Employment Offer Letter (${offerLetterNumber}) - Altera Interior`,
-    html,
-    attachments: attachments.map((att) => ({
-      filename: att.filename,
-      content:
-        typeof att.content === "string"
-          ? Buffer.from(att.content, att.encoding || "base64")
-          : att.content,
-      contentType: att.contentType || "application/pdf",
-    })),
-  };
-
   try {
-    const activeTransporter = await getTransporter();
-    const info = await activeTransporter.sendMail(mailOptions);
-    console.log(
-      `✅ Offer letter email sent to ${to}. MessageId: ${info.messageId}`,
-    );
-    return { success: true, messageId: info.messageId };
+    const result = await _send({
+      from:
+        process.env.EMAIL_FROM || '"Altera HR" <hr@alterainterior.com>',
+      to,
+      subject: `Employment Offer Letter (${offerLetterNumber}) - Altera Interior`,
+      html,
+      attachments,
+    });
+    console.log("✅ Offer letter email sent. MessageId:", result.messageId);
+    return { success: true, messageId: result.messageId };
   } catch (error) {
-    console.error("❌ Error sending offer letter email:", error);
+    console.error("❌ Error sending offer letter email:", error.message);
     throw error;
   }
 };
 
+// ─── Exports (identical to old nodemailer version) ───────────────────────────
 module.exports = {
   sendVerificationEmail,
   sendReportEmail,
@@ -544,5 +508,5 @@ module.exports = {
   sendQuotationEmail,
   sendOfferLetterEmail,
   sendPasswordResetOtp,
-  getTransporter,
+  sendPasswordResetConfirmation,
 };
