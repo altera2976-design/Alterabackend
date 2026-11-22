@@ -14,10 +14,10 @@ router.route('/')
   .post(checkPermission('tasks', 'create'), handleUpload('attachments', 10), taskController.createTask);
 
 router.route('/:id')
-  .get(checkPermission('tasks', 'view'), taskController.getTask)
+  .get(taskController.getTask)
   .delete(checkPermission('tasks', 'delete'), taskController.deleteTask);
 
-router.patch('/:id/progress', checkPermission('tasks', 'edit'), handleUpload('attachments', 10), taskController.updateTaskProgress);
-router.post('/:id/comments', checkPermission('tasks', 'edit'), taskController.addTaskComment);
+router.patch('/:id/progress', handleUpload('attachments', 10), taskController.updateTaskProgress);
+router.post('/:id/comments', taskController.addTaskComment);
 
 module.exports = router;

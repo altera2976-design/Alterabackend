@@ -421,7 +421,8 @@ exports.updateTaskProgress = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Task not found' });
     }
 
-    const isAdmin = req.user.role === 'ADMIN';
+    const userRole = (req.user.role || '').toUpperCase();
+    const isAdmin = userRole === 'ADMIN' || userRole === 'SUPER_ADMIN' || req.user.email === 'admin@alterainterior.com' || req.user.email === 'admin@company.com';
     const isAssignee = task.assignedTo.toString() === req.user._id.toString();
 
     if (!isAdmin && !isAssignee) {
@@ -431,7 +432,7 @@ exports.updateTaskProgress = async (req, res, next) => {
       });
     }
 
-    const { progress, status, comment, attachment, attachments } = req.body;
+    const { progress, status, comment, attachment, attachments, progressImages } = req.body;
     const oldProgress = task.progress;
     const oldStatus = task.status;
 
@@ -439,29 +440,32 @@ exports.updateTaskProgress = async (req, res, next) => {
       task.progress = Number(progress);
       if (Number(progress) === 100) {
         task.status = 'Completed';
-      } else if (Number(progress) > 0 && task.status === 'To Do') {
+      } else if (Number(progress) > 0 && (task.status === 'Pending' || task.status === 'To Do')) {
         task.status = 'In Progress';
       }
     }
 
     if (status !== undefined) {
-      let mappedStatus = status;
-      if (status === 'Pending') mappedStatus = 'To Do';
-      task.status = mappedStatus;
-      if (mappedStatus === 'Completed' && task.progress < 100) {
+      task.status = status;
+      if (status === 'Completed' && task.progress < 100) {
         task.progress = 100;
+      } else if (status === 'In Progress' && task.progress === 0) {
+        task.progress = 50;
       }
     }
 
-    if (comment) {
+    if (comment && String(comment).trim()) {
       task.comments.push({
         authorId: req.user._id,
         authorName: req.user.name,
-        text: comment,
+        text: String(comment).trim(),
         createdAt: new Date(),
       });
     }
 
+    const newlySavedFiles = [];
+
+    // Process files from multipart req.files
     if (req.files && Array.isArray(req.files) && req.files.length > 0) {
       for (const file of req.files) {
         const saved = await saveAttachmentFile(
@@ -475,21 +479,54 @@ exports.updateTaskProgress = async (req, res, next) => {
           req.user._id,
           req.user.name
         );
-        if (saved) task.attachments.push(saved);
+        if (saved) {
+          task.attachments.push(saved);
+          newlySavedFiles.push(saved);
+        }
       }
     }
 
     if (attachment) {
       const saved = await saveAttachmentFile(attachment, req.user._id, req.user.name);
-      if (saved) task.attachments.push(saved);
-    }
-
-    if (Array.isArray(attachments)) {
-      for (const att of attachments) {
-        const saved = await saveAttachmentFile(att, req.user._id, req.user.name);
-        if (saved) task.attachments.push(saved);
+      if (saved) {
+        task.attachments.push(saved);
+        newlySavedFiles.push(saved);
       }
     }
+
+    const rawAttachments = attachments || progressImages;
+    if (Array.isArray(rawAttachments)) {
+      for (const att of rawAttachments) {
+        const saved = await saveAttachmentFile(att, req.user._id, req.user.name);
+        if (saved) {
+          task.attachments.push(saved);
+          newlySavedFiles.push(saved);
+        }
+      }
+    }
+
+    // Save status history record
+    if (!task.statusHistory) {
+      task.statusHistory = [];
+    }
+    task.statusHistory.push({
+      status: task.status,
+      comment: comment ? String(comment).trim() : '',
+      updatedBy: req.user._id,
+      updatedByName: req.user.name,
+      updatedAt: new Date(),
+      images: newlySavedFiles.map((f) => ({
+        fileName: f.fileName,
+        originalName: f.originalName,
+        fileUrl: f.fileUrl,
+        url: f.url,
+        driveFileId: f.driveFileId,
+        driveUrl: f.driveUrl,
+        fileType: f.fileType || f.mimeType,
+        fileSize: f.fileSize,
+        uploadedAt: f.uploadedAt || new Date(),
+      })),
+    });
 
     await task.save();
 

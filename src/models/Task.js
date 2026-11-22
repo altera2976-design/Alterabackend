@@ -53,8 +53,8 @@ const TaskSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['To Do', 'In Progress', 'Blocked', 'Completed'],
-      default: 'To Do',
+      enum: ['Pending', 'To Do', 'In Progress', 'On Hold', 'Blocked', 'Completed'],
+      default: 'Pending',
       index: true,
     },
     progress: {
@@ -67,6 +67,28 @@ const TaskSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
+    statusHistory: [
+      {
+        status: { type: String, required: true },
+        comment: { type: String, default: '' },
+        updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        updatedByName: { type: String, default: '' },
+        updatedAt: { type: Date, default: Date.now },
+        images: [
+          {
+            fileName: { type: String },
+            originalName: { type: String },
+            fileUrl: { type: String },
+            url: { type: String },
+            driveFileId: { type: String },
+            driveUrl: { type: String },
+            fileType: { type: String },
+            fileSize: { type: Number },
+            uploadedAt: { type: Date, default: Date.now },
+          },
+        ],
+      },
+    ],
     comments: [
       {
         authorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
