@@ -16,6 +16,8 @@ const {
   addRemark,
   cleanupOldSelfiesEndpoint,
   updateDailyUpdateOT,
+  updateAttendanceRecord,
+  deleteAttendanceRecord,
 } = require("../controllers/attendanceController");
 
 const router = express.Router();
@@ -25,6 +27,8 @@ router.post("/remarks", protect, addRemark);
 router.post("/:id/remarks", protect, addRemark);
 router.post("/cleanup-selfies", protect, authorize("ADMIN"), cleanupOldSelfiesEndpoint);
 router.put("/:id/daily-update-ot", protect, authorize("ADMIN"), updateDailyUpdateOT);
+router.put("/:id", protect, authorize("ADMIN"), updateAttendanceRecord);
+router.delete("/:id", protect, authorize("ADMIN"), deleteAttendanceRecord);
 
 // ── SELFIE ATTENDANCE ROUTES ───────────────────────────────────────────────
 router.post(

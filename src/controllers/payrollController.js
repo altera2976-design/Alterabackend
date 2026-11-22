@@ -487,6 +487,26 @@ exports.updatePayrollConfigHandler = async (req, res, next) => {
 };
 
 /**
+ * GET /api/payroll/salaries
+ * Retrieve all employee salary structures
+ */
+exports.getAllSalaries = async (req, res, next) => {
+  try {
+    const employees = await User.find(
+      { status: { $ne: 'DELETED' } },
+      'name email employeeId department designation salary salaryType salaryStructure status salaryStatus createdAt'
+    ).sort({ name: 1 });
+
+    res.status(200).json({
+      success: true,
+      employees,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * PUT /api/payroll/employee-salary/:id
  * Update individual employee salary and structure (Admin only)
  */
@@ -504,16 +524,85 @@ exports.updateEmployeeSalaryStructure = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Employee not found.' });
     }
 
-    if (salary !== undefined) employee.salary = Number(salary);
+    const previousSnapshot = {
+      salary: employee.salary,
+      salaryType: employee.salaryType,
+      salaryStructure: employee.salaryStructure ? { ...employee.salaryStructure.toObject?.() || employee.salaryStructure } : {},
+    };
+
     if (salaryType !== undefined) employee.salaryType = salaryType;
-    if (salaryStructure !== undefined) {
-      employee.salaryStructure = {
-        ...employee.salaryStructure,
-        ...salaryStructure,
-      };
+
+    // Merge salaryStructure fields
+    const currentStruct = employee.salaryStructure ? (employee.salaryStructure.toObject?.() || employee.salaryStructure) : {};
+    const updatedStruct = {
+      ...currentStruct,
+      ...(salaryStructure || {}),
+    };
+
+    // Calculate components
+    const basic = Number(updatedStruct.basic || 0);
+    const hra = Number(updatedStruct.hra || 0);
+    const allowances = Number(updatedStruct.allowances || 0);
+    const bonus = Number(updatedStruct.bonus || 0);
+    const overtimeRate = Number(updatedStruct.overtimeRate || 200);
+    const otherEarnings = Number(updatedStruct.otherEarnings || 0);
+
+    const pfDeduction = Number(updatedStruct.pfDeduction || 0);
+    const esiDeduction = Number(updatedStruct.esiDeduction || 0);
+    const profTax = Number(updatedStruct.profTax || 0);
+    const tds = Number(updatedStruct.tds || 0);
+    const advance = Number(updatedStruct.advance || 0);
+    const otherDeductions = Number(updatedStruct.otherDeductions || 0);
+
+    const grossEarnings = basic + hra + allowances + bonus + otherEarnings;
+    const totalDeductions = pfDeduction + esiDeduction + profTax + tds + advance + otherDeductions;
+    const netSalary = Math.max(0, grossEarnings - totalDeductions);
+
+    // If salary was explicitly passed and no detailed structure given, respect it; otherwise use calculated netSalary
+    if (salary !== undefined && (!salaryStructure || Object.keys(salaryStructure).length === 0)) {
+      employee.salary = Number(salary);
+    } else {
+      employee.salary = netSalary;
     }
 
+    employee.salaryStructure = {
+      basic,
+      hra,
+      allowances,
+      bonus,
+      overtimeRate,
+      otherEarnings,
+      pfDeduction,
+      esiDeduction,
+      profTax,
+      tds,
+      advance,
+      otherDeductions,
+      effectiveDate: updatedStruct.effectiveDate ? new Date(updatedStruct.effectiveDate) : new Date(),
+    };
+    employee.salaryStatus = 'ACTIVE';
+
     await employee.save();
+
+    // Log to central AuditLog
+    try {
+      const AuditLog = require('../models/AuditLog');
+      await AuditLog.create({
+        userId: req.user?._id,
+        userName: req.user?.name || 'Administrator',
+        userRole: req.user?.role || 'ADMIN',
+        action: 'SALARY_STRUCTURE_UPDATED',
+        description: `Updated salary structure for employee ${employee.name} (${employee.employeeId || id}) - Net: ₹${employee.salary}`,
+        oldValue: previousSnapshot,
+        newValue: {
+          salary: employee.salary,
+          salaryType: employee.salaryType,
+          salaryStructure: employee.salaryStructure,
+        },
+      });
+    } catch (auditErr) {
+      console.warn('AuditLog error in updateEmployeeSalaryStructure:', auditErr.message);
+    }
 
     res.status(200).json({
       success: true,
@@ -521,10 +610,298 @@ exports.updateEmployeeSalaryStructure = async (req, res, next) => {
       employee: {
         _id: employee._id,
         name: employee.name,
+        employeeId: employee.employeeId,
         salary: employee.salary,
         salaryType: employee.salaryType,
         salaryStructure: employee.salaryStructure,
+        salaryStatus: employee.salaryStatus,
       },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * DELETE /api/payroll/employee-salary/:id
+ * Reset / Clear individual employee salary structure (Admin only)
+ */
+exports.deleteEmployeeSalaryStructure = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid employee ID.' });
+    }
+
+    const employee = await User.findById(id);
+    if (!employee) {
+      return res.status(404).json({ success: false, message: 'Employee not found.' });
+    }
+
+    const previousSnapshot = {
+      salary: employee.salary,
+      salaryType: employee.salaryType,
+      salaryStructure: employee.salaryStructure ? { ...employee.salaryStructure.toObject?.() || employee.salaryStructure } : {},
+    };
+
+    employee.salary = 0;
+    employee.salaryStatus = 'NOT_SET';
+    employee.salaryStructure = {
+      basic: 0,
+      hra: 0,
+      allowances: 0,
+      bonus: 0,
+      overtimeRate: 200,
+      otherEarnings: 0,
+      pfDeduction: 0,
+      esiDeduction: 0,
+      profTax: 0,
+      tds: 0,
+      advance: 0,
+      otherDeductions: 0,
+      effectiveDate: new Date(),
+    };
+
+    await employee.save();
+
+    // Log to central AuditLog
+    try {
+      const AuditLog = require('../models/AuditLog');
+      await AuditLog.create({
+        userId: req.user?._id,
+        userName: req.user?.name || 'Administrator',
+        userRole: req.user?.role || 'ADMIN',
+        action: 'SALARY_STRUCTURE_RESET',
+        description: `Reset salary structure to zero for employee ${employee.name} (${employee.employeeId || id})`,
+        oldValue: previousSnapshot,
+      });
+    } catch (auditErr) {
+      console.warn('AuditLog error in deleteEmployeeSalaryStructure:', auditErr.message);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Salary structure reset for ${employee.name}.`,
+      employee: {
+        _id: employee._id,
+        name: employee.name,
+        salary: 0,
+        salaryStatus: 'NOT_SET',
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * PUT /api/payroll/:id
+ * Edit monthly payroll record (Admin only)
+ */
+exports.updatePayrollRecord = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid payroll ID.' });
+    }
+
+    const payroll = await Payroll.findById(id).populate('userId', 'name email employeeId department');
+    if (!payroll) {
+      return res.status(404).json({ success: false, message: 'Payroll record not found.' });
+    }
+
+    const previousSnapshot = {
+      status: payroll.status,
+      earnings: { ...payroll.earnings.toObject?.() || payroll.earnings },
+      deductions: { ...payroll.deductions.toObject?.() || payroll.deductions },
+      netSalary: payroll.netSalary,
+      payment: { ...payroll.payment.toObject?.() || payroll.payment },
+    };
+
+    const {
+      status,
+      earnings,
+      deductions,
+      payment,
+      attendanceSummary,
+      notes,
+    } = req.body;
+
+    // Merge earnings
+    if (earnings) {
+      payroll.earnings = {
+        ...payroll.earnings.toObject(),
+        ...earnings,
+      };
+    }
+
+    // Merge deductions
+    if (deductions) {
+      payroll.deductions = {
+        ...payroll.deductions.toObject(),
+        ...deductions,
+      };
+    }
+
+    // Merge attendanceSummary
+    if (attendanceSummary) {
+      payroll.attendanceSummary = {
+        ...payroll.attendanceSummary.toObject(),
+        ...attendanceSummary,
+      };
+    }
+
+    // Auto-recalculate gross, totalDeductions, and netSalary
+    const earn = payroll.earnings;
+    const grossSalary =
+      Number(earn.basic || 0) +
+      Number(earn.hra || 0) +
+      Number(earn.allowances || 0) +
+      Number(earn.bonus || 0) +
+      Number(earn.overtimeAmount || 0) +
+      Number(earn.otherEarnings || 0);
+    payroll.earnings.grossSalary = grossSalary;
+
+    const ded = payroll.deductions;
+    const totalDeductions =
+      Number(ded.unpaidLeaveDeduction || 0) +
+      Number(ded.halfDayDeduction || 0) +
+      Number(ded.pf || 0) +
+      Number(ded.esi || 0) +
+      Number(ded.profTax || 0) +
+      Number(ded.tds || 0) +
+      Number(ded.advance || 0) +
+      Number(ded.otherDeductions || 0);
+    payroll.deductions.totalDeductions = totalDeductions;
+
+    payroll.netSalary = Math.max(0, grossSalary - totalDeductions);
+
+    // Update status if passed
+    if (status) {
+      payroll.status = status;
+    }
+
+    // Update payment details if provided
+    if (payment) {
+      payroll.payment = {
+        ...payroll.payment.toObject(),
+        ...payment,
+      };
+      if (payment.paymentStatus === 'PAID') {
+        payroll.status = 'PAID';
+        if (!payroll.payment.paymentDate) payroll.payment.paymentDate = new Date();
+        if (!payroll.payment.paidAmount) payroll.payment.paidAmount = payroll.netSalary;
+        payroll.paidBy = req.user?._id;
+      }
+    }
+
+    // Add entry to payroll.auditLog
+    payroll.auditLog.push({
+      action: 'PAYROLL_MANUAL_UPDATE',
+      performedBy: req.user?._id,
+      performedByName: req.user?.name || 'Administrator',
+      timestamp: new Date(),
+      details: notes || 'Payroll record modified by administrator',
+      previousValue: previousSnapshot,
+      newValue: {
+        status: payroll.status,
+        netSalary: payroll.netSalary,
+        earnings: payroll.earnings,
+        deductions: payroll.deductions,
+      },
+    });
+
+    await payroll.save();
+
+    // Log to central AuditLog
+    try {
+      const AuditLog = require('../models/AuditLog');
+      await AuditLog.create({
+        userId: req.user?._id,
+        userName: req.user?.name || 'Administrator',
+        userRole: req.user?.role || 'ADMIN',
+        action: 'PAYROLL_RECORD_UPDATED',
+        description: `Updated payroll for ${payroll.userId?.name || 'Employee'} (${payroll.month}) - Net: ₹${payroll.netSalary}`,
+        oldValue: previousSnapshot,
+        newValue: {
+          status: payroll.status,
+          netSalary: payroll.netSalary,
+          grossSalary: payroll.earnings.grossSalary,
+          totalDeductions: payroll.deductions.totalDeductions,
+        },
+      });
+    } catch (auditErr) {
+      console.warn('AuditLog error in updatePayrollRecord:', auditErr.message);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Payroll record for ${payroll.userId?.name || 'Employee'} updated successfully.`,
+      payroll,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * DELETE /api/payroll/:id
+ * Delete payroll record (Controlled deletion & reversal)
+ */
+exports.deletePayrollRecord = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const isReversal = req.body?.isReversal || req.query?.isReversal === 'true';
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid payroll ID.' });
+    }
+
+    const payroll = await Payroll.findById(id).populate('userId', 'name email employeeId');
+    if (!payroll) {
+      return res.status(404).json({ success: false, message: 'Payroll record not found.' });
+    }
+
+    const employeeName = payroll.userId?.name || 'Employee';
+
+    // Do not allow normal deletion of PAID payroll records
+    if (payroll.status === 'PAID' && !isReversal) {
+      return res.status(400).json({
+        success: false,
+        isPaidRecord: true,
+        message: `Cannot delete a PAID payroll record for ${employeeName} (Month: ${payroll.month}, Paid: ₹${payroll.netSalary}). Please use the controlled Payroll Reversal process.`,
+      });
+    }
+
+    const previousSnapshot = {
+      employeeName,
+      month: payroll.month,
+      status: payroll.status,
+      netSalary: payroll.netSalary,
+      payment: payroll.payment,
+    };
+
+    await Payroll.findByIdAndDelete(id);
+
+    // Log to central AuditLog
+    try {
+      const AuditLog = require('../models/AuditLog');
+      await AuditLog.create({
+        userId: req.user?._id,
+        userName: req.user?.name || 'Administrator',
+        userRole: req.user?.role || 'ADMIN',
+        action: isReversal ? 'PAYROLL_RECORD_REVERSED' : 'PAYROLL_RECORD_DELETED',
+        description: `${isReversal ? 'Reversed and removed' : 'Deleted'} payroll record for ${employeeName} (${payroll.month})`,
+        oldValue: previousSnapshot,
+      });
+    } catch (auditErr) {
+      console.warn('AuditLog error in deletePayrollRecord:', auditErr.message);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Payroll record for ${employeeName} (${payroll.month}) ${isReversal ? 'reversed and deleted' : 'deleted'} successfully.`,
     });
   } catch (error) {
     next(error);

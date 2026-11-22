@@ -258,7 +258,7 @@ const getOfferLetterById = async (req, res) => {
 };
 
 /**
- * Update Offer Letter (Draft/Pending only)
+ * Update Offer Letter (Draft/Pending or Super Admin)
  */
 const updateOfferLetter = async (req, res) => {
   try {
@@ -271,15 +271,28 @@ const updateOfferLetter = async (req, res) => {
       });
     }
 
-    const isSuper = req.user?.role === 'SUPER_ADMIN';
+    const userRole = (req.user?.role || '').toUpperCase();
+    const isSuper = userRole === 'SUPER_ADMIN' || req.user?.email === 'admin@alterainterior.com' || req.user?.email === 'alterakitcheninteriorr@gmail.com';
 
     // Lock edit if already RELEASED or ACCEPTED unless Super Admin
     if (!isSuper && ['RELEASED', 'ACCEPTED', 'REVOKED'].includes(offerLetter.status)) {
       return res.status(403).json({
         success: false,
-        message: `Cannot edit offer letter in ${offerLetter.status} status.`,
+        message: `Cannot edit offer letter in ${offerLetter.status} status without Super Admin authorization.`,
       });
     }
+
+    const previousSnapshot = {
+      candidateName: offerLetter.candidateName,
+      email: offerLetter.email,
+      mobile: offerLetter.mobile,
+      designation: offerLetter.designation,
+      department: offerLetter.department,
+      joiningDate: offerLetter.joiningDate,
+      monthlySalary: offerLetter.monthlySalary,
+      annualCTC: offerLetter.annualCTC,
+      status: offerLetter.status,
+    };
 
     const allowedFields = [
       'candidateName',
@@ -302,25 +315,61 @@ const updateOfferLetter = async (req, res) => {
       'offerParagraph',
       'rulesAndRegulations',
       'offerLetterDate',
+      'status',
     ];
 
     allowedFields.forEach((field) => {
       if (req.body[field] !== undefined) {
-        offerLetter[field] = req.body[field];
+        if (field === 'monthlySalary' || field === 'annualCTC') {
+          offerLetter[field] = Number(req.body[field]) || 0;
+        } else {
+          offerLetter[field] = req.body[field];
+        }
       }
     });
 
+    // Auto-sync monthlySalary and annualCTC if one is changed without the other
+    if (req.body.monthlySalary !== undefined && req.body.annualCTC === undefined) {
+      offerLetter.annualCTC = Number(req.body.monthlySalary) * 12;
+    } else if (req.body.annualCTC !== undefined && req.body.monthlySalary === undefined) {
+      offerLetter.monthlySalary = Math.round(Number(req.body.annualCTC) / 12);
+    }
+
     offerLetter.auditLogs.push({
       user: req.user?._id,
-      userName: req.user?.name || 'User',
+      userName: req.user?.name || 'Administrator',
       userRole: req.user?.role || 'ADMIN',
       action: 'Offer letter updated',
       timestamp: new Date(),
       ip: req.ip || '',
-      details: `Updated offer details for candidate ${offerLetter.candidateName}`,
+      details: `Updated offer details for candidate ${offerLetter.candidateName} (${offerLetter.offerLetterNumber})`,
     });
 
     await offerLetter.save();
+
+    // Log to central AuditLog
+    try {
+      const AuditLog = require('../models/AuditLog');
+      await AuditLog.create({
+        userId: req.user?._id,
+        userName: req.user?.name || 'Administrator',
+        userRole: req.user?.role || 'ADMIN',
+        action: 'OFFER_LETTER_UPDATED',
+        description: `Updated offer letter ${offerLetter.offerLetterNumber} for ${offerLetter.candidateName}`,
+        oldValue: previousSnapshot,
+        newValue: {
+          candidateName: offerLetter.candidateName,
+          email: offerLetter.email,
+          designation: offerLetter.designation,
+          joiningDate: offerLetter.joiningDate,
+          monthlySalary: offerLetter.monthlySalary,
+          annualCTC: offerLetter.annualCTC,
+          status: offerLetter.status,
+        },
+      });
+    } catch (auditErr) {
+      console.warn('AuditLog error in updateOfferLetter:', auditErr.message);
+    }
 
     return res.json({
       success: true,
@@ -337,7 +386,7 @@ const updateOfferLetter = async (req, res) => {
 };
 
 /**
- * Delete Offer Letter (Draft only)
+ * Delete Offer Letter (Draft/Cancelled or Super Admin)
  */
 const deleteOfferLetter = async (req, res) => {
   try {
@@ -350,19 +399,46 @@ const deleteOfferLetter = async (req, res) => {
       });
     }
 
-    // Do NOT allow deletion of RELEASED or ACCEPTED offer letters
-    if (offerLetter.status === 'RELEASED' || offerLetter.status === 'ACCEPTED') {
+    const userRole = (req.user?.role || '').toUpperCase();
+    const isSuper = userRole === 'SUPER_ADMIN' || req.user?.email === 'admin@alterainterior.com' || req.user?.email === 'alterakitcheninteriorr@gmail.com';
+
+    // Disallow normal admin deletion of official RELEASED or ACCEPTED offer letters
+    if (!isSuper && (offerLetter.status === 'RELEASED' || offerLetter.status === 'ACCEPTED')) {
       return res.status(400).json({
         success: false,
-        message: 'Cannot delete an official RELEASED or ACCEPTED offer letter. You may revoke it instead.',
+        message: 'Cannot delete an official RELEASED or ACCEPTED offer letter. Only Super Admin can delete or you may revoke it instead.',
       });
     }
 
+    const previousSnapshot = {
+      offerLetterNumber: offerLetter.offerLetterNumber,
+      candidateName: offerLetter.candidateName,
+      email: offerLetter.email,
+      designation: offerLetter.designation,
+      status: offerLetter.status,
+      annualCTC: offerLetter.annualCTC,
+    };
+
     await OfferLetter.findByIdAndDelete(req.params.id);
+
+    // Log to central AuditLog
+    try {
+      const AuditLog = require('../models/AuditLog');
+      await AuditLog.create({
+        userId: req.user?._id,
+        userName: req.user?.name || 'Administrator',
+        userRole: req.user?.role || 'ADMIN',
+        action: 'OFFER_LETTER_DELETED',
+        description: `Deleted offer letter ${offerLetter.offerLetterNumber} for candidate ${offerLetter.candidateName}`,
+        oldValue: previousSnapshot,
+      });
+    } catch (auditErr) {
+      console.warn('AuditLog error in deleteOfferLetter:', auditErr.message);
+    }
 
     return res.json({
       success: true,
-      message: 'Offer letter draft deleted successfully.',
+      message: `Offer letter ${offerLetter.offerLetterNumber} deleted successfully.`,
     });
   } catch (error) {
     console.error('Error deleting offer letter:', error);

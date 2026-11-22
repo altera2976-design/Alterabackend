@@ -984,3 +984,177 @@ exports.updateDailyUpdateOT = async (req, res, next) => {
     next(error);
   }
 };
+
+// @desc    Edit full attendance record (Admin only)
+// @route   PUT /api/attendance/:id
+// @access  Private/Admin
+exports.updateAttendanceRecord = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid attendance record ID.' });
+    }
+
+    const attendance = await Attendance.findById(id).populate('userId', 'name email employeeId department');
+    if (!attendance) {
+      return res.status(404).json({ success: false, message: 'Attendance record not found.' });
+    }
+
+    const previousSnapshot = {
+      date: attendance.date,
+      status: attendance.status,
+      checkInTime: attendance.checkInTime,
+      checkOutTime: attendance.checkOutTime,
+      totalHours: attendance.totalHours,
+      otHours: attendance.otHours,
+      verificationStatus: attendance.verificationStatus,
+    };
+
+    const {
+      date,
+      status,
+      checkInTime,
+      checkOutTime,
+      totalHours,
+      otHours,
+      remarks,
+      leaveType,
+      leaveReason,
+    } = req.body;
+
+    if (date !== undefined) attendance.date = date;
+    if (status !== undefined) attendance.status = status;
+    if (leaveType !== undefined) attendance.leaveType = leaveType;
+    if (leaveReason !== undefined) attendance.leaveReason = leaveReason;
+
+    // Handle Check-in time
+    if (checkInTime !== undefined) {
+      attendance.checkInTime = checkInTime ? new Date(checkInTime) : null;
+    }
+
+    // Handle Check-out time
+    if (checkOutTime !== undefined) {
+      attendance.checkOutTime = checkOutTime ? new Date(checkOutTime) : null;
+    }
+
+    // Auto-calculate working hours if check-in & check-out times exist
+    if (attendance.checkInTime && attendance.checkOutTime) {
+      const diffMs = new Date(attendance.checkOutTime) - new Date(attendance.checkInTime);
+      const calculatedHours = Math.round((diffMs / (1000 * 60 * 60)) * 10) / 10;
+      if (totalHours !== undefined && totalHours !== '') {
+        attendance.totalHours = Number(totalHours);
+      } else {
+        attendance.totalHours = Math.max(0, calculatedHours);
+      }
+    } else if (totalHours !== undefined && totalHours !== '') {
+      attendance.totalHours = Number(totalHours);
+    }
+
+    if (otHours !== undefined) {
+      attendance.otHours = Number(otHours) || 0;
+    }
+
+    // If marked absent or leave without times, ensure totalHours is 0
+    if (attendance.status === 'ABSENT') {
+      attendance.totalHours = 0;
+      attendance.otHours = 0;
+    }
+
+    // Add remark entry for modification history
+    const remarkText = remarks || `Attendance corrected by Administrator (${req.user?.name || 'Admin'}). Status: ${attendance.status}, Hours: ${attendance.totalHours}`;
+    attendance.remarks.push({
+      text: remarkText,
+      addedBy: req.user?._id,
+      addedByName: req.user?.name || 'Administrator',
+      addedByRole: req.user?.role || 'ADMIN',
+      createdAt: new Date(),
+    });
+
+    await attendance.save();
+
+    // Log to central AuditLog
+    try {
+      const AuditLog = require('../models/AuditLog');
+      await AuditLog.create({
+        userId: req.user?._id,
+        userName: req.user?.name || 'Administrator',
+        userRole: req.user?.role || 'ADMIN',
+        action: 'ATTENDANCE_RECORD_UPDATED',
+        description: `Updated attendance for ${attendance.userId?.name || 'Employee'} on ${attendance.date}: Status=${attendance.status}, Hours=${attendance.totalHours}`,
+        oldValue: previousSnapshot,
+        newValue: {
+          date: attendance.date,
+          status: attendance.status,
+          checkInTime: attendance.checkInTime,
+          checkOutTime: attendance.checkOutTime,
+          totalHours: attendance.totalHours,
+          otHours: attendance.otHours,
+        },
+      });
+    } catch (auditErr) {
+      console.warn('AuditLog error in updateAttendanceRecord:', auditErr.message);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Attendance record for ${attendance.userId?.name || 'Employee'} on ${attendance.date} updated successfully.`,
+      data: attendance,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Delete attendance record (Admin only)
+// @route   DELETE /api/attendance/:id
+// @access  Private/Admin
+exports.deleteAttendanceRecord = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid attendance record ID.' });
+    }
+
+    const attendance = await Attendance.findById(id).populate('userId', 'name email employeeId');
+    if (!attendance) {
+      return res.status(404).json({ success: false, message: 'Attendance record not found.' });
+    }
+
+    const employeeName = attendance.userId?.name || 'Employee';
+    const recordDate = attendance.date;
+
+    const previousSnapshot = {
+      employeeName,
+      date: attendance.date,
+      status: attendance.status,
+      checkInTime: attendance.checkInTime,
+      checkOutTime: attendance.checkOutTime,
+      totalHours: attendance.totalHours,
+      otHours: attendance.otHours,
+    };
+
+    await Attendance.findByIdAndDelete(id);
+
+    // Log to central AuditLog
+    try {
+      const AuditLog = require('../models/AuditLog');
+      await AuditLog.create({
+        userId: req.user?._id,
+        userName: req.user?.name || 'Administrator',
+        userRole: req.user?.role || 'ADMIN',
+        action: 'ATTENDANCE_RECORD_DELETED',
+        description: `Deleted attendance record for ${employeeName} on ${recordDate}`,
+        oldValue: previousSnapshot,
+      });
+    } catch (auditErr) {
+      console.warn('AuditLog error in deleteAttendanceRecord:', auditErr.message);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Attendance record for ${employeeName} on ${recordDate} deleted successfully.`,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
