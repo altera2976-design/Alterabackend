@@ -947,6 +947,11 @@ exports.updateAppPermissions = async (req, res, next) => {
         customId: employee.employeeId,
         employeeAppPermissions: updatedPerms,
       });
+      io.emit("entity_changed", {
+        entity: "employee",
+        action: "permissions_updated",
+        data: { employeeId: employee._id, employeeAppPermissions: updatedPerms },
+      });
     }
 
     res.status(200).json({

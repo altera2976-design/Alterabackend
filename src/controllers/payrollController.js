@@ -9,6 +9,7 @@ const {
   generateAttendanceSignature,
 } = require('../services/payrollService');
 const { sendPayslipEmail } = require('../services/emailService');
+const { broadcastEntityChange } = require('../utils/socketSync');
 
 /**
  * Format currency helper
@@ -604,6 +605,13 @@ exports.updateEmployeeSalaryStructure = async (req, res, next) => {
       console.warn('AuditLog error in updateEmployeeSalaryStructure:', auditErr.message);
     }
 
+    broadcastEntityChange(req, 'salary', 'update', {
+      employeeId: employee._id,
+      name: employee.name,
+      salary: employee.salary,
+      salaryStructure: employee.salaryStructure,
+    });
+
     res.status(200).json({
       success: true,
       message: `Salary structure updated for ${employee.name}.`,
@@ -679,6 +687,8 @@ exports.deleteEmployeeSalaryStructure = async (req, res, next) => {
     } catch (auditErr) {
       console.warn('AuditLog error in deleteEmployeeSalaryStructure:', auditErr.message);
     }
+
+    broadcastEntityChange(req, 'salary', 'delete', { employeeId: employee._id });
 
     res.status(200).json({
       success: true,
@@ -835,6 +845,8 @@ exports.updatePayrollRecord = async (req, res, next) => {
       console.warn('AuditLog error in updatePayrollRecord:', auditErr.message);
     }
 
+    broadcastEntityChange(req, 'payroll', 'update', payroll);
+
     res.status(200).json({
       success: true,
       message: `Payroll record for ${payroll.userId?.name || 'Employee'} updated successfully.`,
@@ -898,6 +910,8 @@ exports.deletePayrollRecord = async (req, res, next) => {
     } catch (auditErr) {
       console.warn('AuditLog error in deletePayrollRecord:', auditErr.message);
     }
+
+    broadcastEntityChange(req, 'payroll', 'delete', { id, isReversal });
 
     res.status(200).json({
       success: true,

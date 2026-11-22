@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const OfferLetter = require('../models/OfferLetter');
 const { sendOfferLetterEmail } = require('../services/emailService');
 const googleDriveService = require('../services/googleDrive.service');
+const { broadcastEntityChange } = require('../utils/socketSync');
 
 /**
  * Generate next sequential Offer Letter Number (e.g. OFR-2026-0001)
@@ -127,6 +128,7 @@ const createOfferLetter = async (req, res) => {
     });
 
     await offerLetter.save();
+    broadcastEntityChange(req, 'offer_letter', 'create', offerLetter);
 
     return res.status(201).json({
       success: true,
@@ -371,6 +373,8 @@ const updateOfferLetter = async (req, res) => {
       console.warn('AuditLog error in updateOfferLetter:', auditErr.message);
     }
 
+    broadcastEntityChange(req, 'offer_letter', 'update', offerLetter);
+
     return res.json({
       success: true,
       message: 'Offer letter updated successfully.',
@@ -435,6 +439,8 @@ const deleteOfferLetter = async (req, res) => {
     } catch (auditErr) {
       console.warn('AuditLog error in deleteOfferLetter:', auditErr.message);
     }
+
+    broadcastEntityChange(req, 'offer_letter', 'delete', { id: req.params.id, offerLetterNumber: offerLetter.offerLetterNumber });
 
     return res.json({
       success: true,

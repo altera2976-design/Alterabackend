@@ -10,6 +10,7 @@ const Setting = require('../models/Setting');
 const User = require('../models/User');
 const { AppError } = require('../middleware/errorHandler');
 const googleDriveService = require('../services/googleDrive.service');
+const { broadcastEntityChange } = require('../utils/socketSync');
 
 // Haversine formula to calculate distance between two coordinates in meters
 const calculateDistance = (lat1, lon1, lat2, lon2) => {
@@ -1095,6 +1096,8 @@ exports.updateAttendanceRecord = async (req, res, next) => {
       console.warn('AuditLog error in updateAttendanceRecord:', auditErr.message);
     }
 
+    broadcastEntityChange(req, 'attendance', 'update', attendance);
+
     res.status(200).json({
       success: true,
       message: `Attendance record for ${attendance.userId?.name || 'Employee'} on ${attendance.date} updated successfully.`,
@@ -1149,6 +1152,8 @@ exports.deleteAttendanceRecord = async (req, res, next) => {
     } catch (auditErr) {
       console.warn('AuditLog error in deleteAttendanceRecord:', auditErr.message);
     }
+
+    broadcastEntityChange(req, 'attendance', 'delete', { id, employeeName, recordDate });
 
     res.status(200).json({
       success: true,

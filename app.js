@@ -108,6 +108,7 @@ app.use("/api/offer_letters", require("./src/routes/offerLetterRoutes"));
 app.use("/api/offer-letter", require("./src/routes/offerLetterRoutes"));
 app.use("/api/offerletter", require("./src/routes/offerLetterRoutes"));
 app.use("/api/settings", require("./src/routes/settingRoutes"));
+app.use("/api/app-config", require("./src/routes/appConfigRoutes"));
 app.use("/api/crm", require("./src/routes/crmRoutes"));
 app.use("/api/finance", require("./src/routes/financeRoutes"));
 app.use("/api/transactions", require("./src/routes/transactionRoutes"));
