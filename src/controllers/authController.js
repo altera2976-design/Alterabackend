@@ -765,6 +765,26 @@ exports.forgotPassword = async (req, res, next) => {
       });
     }
 
+    // Role validation: Admin can only reset admin accounts; Employees can only reset employee accounts.
+    const expectedRole = (req.body.expectedRole || req.body.role || "").toUpperCase().trim();
+    if (expectedRole === "ADMIN" || expectedRole === "SUPER_ADMIN") {
+      const isAdminUser = user.role === "ADMIN" || user.role === "SUPER_ADMIN" || user.employeeId === "EMP001";
+      if (!isAdminUser) {
+        return res.status(403).json({
+          success: false,
+          message: "Employee accounts cannot be reset from the Admin portal. Please use the mobile application.",
+        });
+      }
+    } else if (expectedRole === "EMPLOYEE") {
+      const isAdminUser = user.role === "ADMIN" || user.role === "SUPER_ADMIN" || user.employeeId === "EMP001";
+      if (isAdminUser) {
+        return res.status(403).json({
+          success: false,
+          message: "Admin accounts cannot be reset through the employee portal. Please use the Admin portal.",
+        });
+      }
+    }
+
     // Resend cooldown check: 60 seconds
     if (user.resetPasswordOtpLastSent) {
       const timeSinceLastOtp = Date.now() - user.resetPasswordOtpLastSent.getTime();
@@ -897,6 +917,26 @@ exports.verifyOtp = async (req, res, next) => {
 
     if (!user || !user.resetPasswordOtp || !user.resetPasswordOtpExpire) {
       return res.status(400).json(genericInvalidMsg);
+    }
+
+    // Role validation if expectedRole is passed
+    const expectedRole = (req.body.expectedRole || req.body.role || "").toUpperCase().trim();
+    if (expectedRole === "ADMIN" || expectedRole === "SUPER_ADMIN") {
+      const isAdminUser = user.role === "ADMIN" || user.role === "SUPER_ADMIN" || user.employeeId === "EMP001";
+      if (!isAdminUser) {
+        return res.status(403).json({
+          success: false,
+          message: "Unauthorized role for admin password reset.",
+        });
+      }
+    } else if (expectedRole === "EMPLOYEE") {
+      const isAdminUser = user.role === "ADMIN" || user.role === "SUPER_ADMIN" || user.employeeId === "EMP001";
+      if (isAdminUser) {
+        return res.status(403).json({
+          success: false,
+          message: "Admin accounts cannot be reset through the employee portal.",
+        });
+      }
     }
 
     // Check expiration (5 minutes)
@@ -1158,6 +1198,26 @@ exports.resetPassword = async (req, res, next) => {
 
     if (!user) {
       return res.status(400).json(genericInvalidMsg);
+    }
+
+    // Role validation if expectedRole is passed
+    const expectedRole = (req.body.expectedRole || req.body.role || "").toUpperCase().trim();
+    if (expectedRole === "ADMIN" || expectedRole === "SUPER_ADMIN") {
+      const isAdminUser = user.role === "ADMIN" || user.role === "SUPER_ADMIN" || user.employeeId === "EMP001";
+      if (!isAdminUser) {
+        return res.status(403).json({
+          success: false,
+          message: "Unauthorized role for admin password reset.",
+        });
+      }
+    } else if (expectedRole === "EMPLOYEE") {
+      const isAdminUser = user.role === "ADMIN" || user.role === "SUPER_ADMIN" || user.employeeId === "EMP001";
+      if (isAdminUser) {
+        return res.status(403).json({
+          success: false,
+          message: "Admin accounts cannot be reset through the employee portal.",
+        });
+      }
     }
 
     // Check if new password is compromised using HIBP
