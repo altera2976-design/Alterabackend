@@ -152,8 +152,7 @@ exports.createEmployee = async (req, res, next) => {
     const isCompromised = await isPasswordCompromised(password);
     const requesterIsSuper =
       req.user?.role === "SUPER_ADMIN" ||
-      req.user?.email === "admin@alterainterior.com" ||
-      req.user?.email === "admin@company.com";
+      req.user?.email === (process.env.SUPER_ADMIN_EMAIL || "alterakitcheninteriorr@gmail.com").toLowerCase();
 
     if (isCompromised && !requesterIsSuper) {
       return res.status(400).json({
@@ -276,12 +275,10 @@ exports.updateEmployee = async (req, res, next) => {
 
     const requesterIsSuper =
       req.user?.role === "SUPER_ADMIN" ||
-      req.user?.email === "admin@alterainterior.com" ||
-      req.user?.email === "admin@company.com";
+      req.user?.email === (process.env.SUPER_ADMIN_EMAIL || "alterakitcheninteriorr@gmail.com").toLowerCase();
     const targetIsSuper =
       user.role === "SUPER_ADMIN" ||
-      user.email === "admin@alterainterior.com" ||
-      user.email === "admin@company.com";
+      user.email === (process.env.SUPER_ADMIN_EMAIL || "alterakitcheninteriorr@gmail.com").toLowerCase();
 
     if (targetIsSuper && !requesterIsSuper) {
       return res
@@ -465,8 +462,7 @@ exports.deleteEmployee = async (req, res, next) => {
 
     if (
       user.role === "SUPER_ADMIN" ||
-      user.email === "admin@alterainterior.com" ||
-      user.email === "admin@company.com"
+      user.email === (process.env.SUPER_ADMIN_EMAIL || "alterakitcheninteriorr@gmail.com").toLowerCase()
     ) {
       return res
         .status(403)

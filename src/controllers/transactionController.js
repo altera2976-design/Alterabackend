@@ -676,8 +676,7 @@ exports.deleteTransaction = async (req, res, next) => {
     const userEmail = (req.user?.email || '').toLowerCase();
     const isSuper =
       userRole === 'SUPER_ADMIN' ||
-      userEmail === 'admin@alterainterior.com' ||
-      userEmail === 'admin@company.com';
+      userEmail === (process.env.SUPER_ADMIN_EMAIL || "alterakitcheninteriorr@gmail.com").toLowerCase();
 
     if (!isSuper) {
       return res.status(403).json({ success: false, message: 'Only Super Admin is authorized to delete transactions.' });

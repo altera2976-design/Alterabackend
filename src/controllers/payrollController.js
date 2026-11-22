@@ -209,7 +209,7 @@ exports.getEmployeeSalaryDetail = async (req, res, next) => {
 
     // Authorization: Employee can only see their own salary
     const isAdminRole = req.user.role === 'ADMIN' || req.user.role === 'SUPER_ADMIN' ||
-      req.user.email === 'admin@alterainterior.com' || req.user.email === 'admin@company.com';
+      req.user.email === (process.env.SUPER_ADMIN_EMAIL || "alterakitcheninteriorr@gmail.com").toLowerCase();
     if (!isAdminRole && req.user._id.toString() !== id) {
       return res.status(403).json({
         success: false,

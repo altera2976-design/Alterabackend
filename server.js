@@ -12,6 +12,14 @@ const startServer = async () => {
   await connectDB();
   await googleDriveService.initializeFolderStructure();
 
+  // Enforce Super Admin and revoke disabled accounts
+  try {
+    const { syncSuperAdminAndRevokeOldAccounts } = require("./src/controllers/authController");
+    await syncSuperAdminAndRevokeOldAccounts();
+  } catch (syncErr) {
+    console.warn("⚠️ Failed to sync Super Admin:", syncErr.message);
+  }
+
   // Scheduled 45-day attendance selfie cleanup (Runs on startup & every 24 hrs)
   try {
     const { performSelfieCleanup45Days } = require("./src/controllers/attendanceController");

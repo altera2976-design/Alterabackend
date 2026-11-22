@@ -1,6 +1,24 @@
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 
+const getSuperAdminEmail = () => {
+  return (
+    process.env.SUPER_ADMIN_EMAIL ||
+    process.env.ADMIN_EMAIL ||
+    "alterakitcheninteriorr@gmail.com"
+  ).toLowerCase().trim();
+};
+
+const getDisabledAdminEmails = () => {
+  const currentSuper = getSuperAdminEmail();
+  const list = [
+    "admin@company.com",
+    "admin@alterainterior.com",
+    "alterakitcheninterior@gmail.com",
+  ];
+  return list.filter((e) => e !== currentSuper);
+};
+
 /**
  * protect middleware - Verifies JWT and attaches user to req.user
  */
@@ -32,7 +50,15 @@ const protect = async (req, res, next) => {
       });
     }
 
-    if (user.status === "INACTIVE") {
+    // Explicit revocation of disabled admin accounts
+    if (getDisabledAdminEmails().includes((user.email || "").toLowerCase())) {
+      return res.status(401).json({
+        success: false,
+        message: "This account has been disabled. Access revoked.",
+      });
+    }
+
+    if (user.status === "INACTIVE" || user.status === "SUSPENDED" || user.accessStatus === "SUSPENDED") {
       return res.status(401).json({
         success: false,
         message: "Your account has been deactivated. Please contact admin.",
@@ -50,11 +76,7 @@ const protect = async (req, res, next) => {
       }
     }
 
-    if (
-      user.email === "admin@company.com" ||
-      user.email === "admin@alterainterior.com" ||
-      user.email === "alterakitcheninteriorr@gmail.com"
-    ) {
+    if (user.email === getSuperAdminEmail() || user.employeeId === "EMP001") {
       user.role = "SUPER_ADMIN";
     }
 
@@ -86,9 +108,7 @@ const authorize = (...roles) => {
     const userEmail = (req.user?.email || "").toLowerCase();
     const isSuper =
       userRole === "SUPER_ADMIN" ||
-      userEmail === "admin@alterainterior.com" ||
-      userEmail === "admin@company.com" ||
-      userEmail === "alterakitcheninteriorr@gmail.com";
+      userEmail === getSuperAdminEmail();
     const isAdmin =
       userRole === "ADMIN" || userRole.includes("ADMIN") || isSuper;
 
@@ -119,9 +139,7 @@ const checkPermission = (moduleName, action = "view") => {
     const userEmail = (req.user?.email || "").toLowerCase();
     const isSuper =
       userRole === "SUPER_ADMIN" ||
-      userEmail === "admin@alterainterior.com" ||
-      userEmail === "admin@company.com" ||
-      userEmail === "alterakitcheninteriorr@gmail.com";
+      userEmail === getSuperAdminEmail();
 
     // 1. Super Admins always have full access
     if (isSuper) {

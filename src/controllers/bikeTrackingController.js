@@ -288,9 +288,7 @@ exports.getActiveSession = async (req, res, next) => {
     const isSuperOrAdmin =
       userRole === "ADMIN" ||
       userRole === "SUPER_ADMIN" ||
-      userEmail === "admin@company.com" ||
-      userEmail === "admin@alterainterior.com" ||
-      userEmail === "alterakitcheninteriorr@gmail.com";
+      userEmail === (process.env.SUPER_ADMIN_EMAIL || "alterakitcheninteriorr@gmail.com").toLowerCase();
 
     let activeSession = await BikeTracking.findOne({
       employeeId: req.user.id || req.user._id,
@@ -372,9 +370,7 @@ exports.getHistory = async (req, res, next) => {
     const isSuperOrAdmin =
       userRole === "ADMIN" ||
       userRole === "SUPER_ADMIN" ||
-      userEmail === "admin@company.com" ||
-      userEmail === "admin@alterainterior.com" ||
-      userEmail === "alterakitcheninteriorr@gmail.com";
+      userEmail === (process.env.SUPER_ADMIN_EMAIL || "alterakitcheninteriorr@gmail.com").toLowerCase();
 
     const filter = { status: "COMPLETED" };
     // If not Admin/Super Admin, filter by user's employeeId
@@ -410,9 +406,7 @@ exports.getMonthlySummary = async (req, res, next) => {
     const isSuperOrAdmin =
       userRole === "ADMIN" ||
       userRole === "SUPER_ADMIN" ||
-      userEmail === "admin@company.com" ||
-      userEmail === "admin@alterainterior.com" ||
-      userEmail === "alterakitcheninteriorr@gmail.com";
+      userEmail === (process.env.SUPER_ADMIN_EMAIL || "alterakitcheninteriorr@gmail.com").toLowerCase();
 
     const filter = {
       status: "COMPLETED",

@@ -14,6 +14,97 @@ const generateOTP = () => {
   return crypto.randomInt(100000, 1000000).toString();
 };
 
+// The authorized Super Admin email securely read from environment variable
+const getSuperAdminEmail = () => {
+  return (
+    process.env.SUPER_ADMIN_EMAIL ||
+    process.env.ADMIN_EMAIL ||
+    "alterakitcheninteriorr@gmail.com"
+  ).toLowerCase().trim();
+};
+
+// Disabled accounts that must NEVER log in or reset passwords
+const getDisabledAdminEmails = () => {
+  const currentSuper = getSuperAdminEmail();
+  const list = [
+    "admin@company.com",
+    "admin@alterainterior.com",
+    "alterakitcheninterior@gmail.com", // Old single-r email disabled
+  ];
+  return list.filter((e) => e !== currentSuper);
+};
+
+exports.getSuperAdminEmail = getSuperAdminEmail;
+exports.getDisabledAdminEmails = getDisabledAdminEmails;
+
+/**
+ * Startup synchronization: revokes existing admin accounts and ensures
+ * SUPER_ADMIN_EMAIL is the sole active SUPER_ADMIN while preserving its password.
+ */
+exports.syncSuperAdminAndRevokeOldAccounts = async () => {
+  try {
+    const superEmail = getSuperAdminEmail();
+    const disabledList = getDisabledAdminEmails();
+
+    // 1. Invalidate and disable the old accounts in database
+    const disabledUsers = await User.find({
+      email: { $in: disabledList },
+    });
+
+    for (const u of disabledUsers) {
+      if (u.email.toLowerCase() === superEmail) continue;
+
+      u.status = "SUSPENDED";
+      u.accessStatus = "SUSPENDED";
+      u.isAdminPanelEnabled = false;
+      u.passwordChangedAt = new Date(); // Revokes active JWT sessions immediately
+      u.resetPasswordOtp = undefined;
+      u.resetPasswordToken = undefined;
+      u.resetPasswordOtpExpire = undefined;
+      await u.save();
+      console.log(`🔒 Revoked & disabled old login account: ${u.email}`);
+    }
+
+    // 2. Ensure Super Admin account exists, is ACTIVE, and SUPER_ADMIN
+    let superAdmin = await User.findOne({
+      $or: [
+        { email: superEmail },
+        { employeeId: "EMP001" },
+        { role: "SUPER_ADMIN" },
+      ],
+    });
+
+    if (superAdmin) {
+      superAdmin.email = superEmail;
+      superAdmin.role = "SUPER_ADMIN";
+      superAdmin.status = "ACTIVE";
+      superAdmin.accessStatus = "APPROVED";
+      superAdmin.isAdminPanelEnabled = true;
+      if (!superAdmin.employeeId) superAdmin.employeeId = "EMP001";
+      if (!superAdmin.name) superAdmin.name = "Altera Super Admin";
+      // Existing password is strictly preserved
+      await superAdmin.save();
+      console.log(`👑 Super Admin synchronized: ${superEmail} (EMP001)`);
+    } else {
+      await User.create({
+        name: "Altera Super Admin",
+        email: superEmail,
+        password: process.env.ADMIN_PASSWORD || "Altera@2025!",
+        role: "SUPER_ADMIN",
+        status: "ACTIVE",
+        accessStatus: "APPROVED",
+        employeeId: "EMP001",
+        department: "Management",
+        designation: "Super Admin",
+        isAdminPanelEnabled: true,
+      });
+      console.log(`👑 Super Admin created: ${superEmail} (EMP001)`);
+    }
+  } catch (err) {
+    console.error("⚠️ Error in syncSuperAdminAndRevokeOldAccounts:", err.message);
+  }
+};
+
 const googleClient = new OAuth2Client();
 
 /**
@@ -25,11 +116,19 @@ exports.login = async (req, res, next) => {
     const { email, password } = req.body;
     const identifier = (email || "").trim().toLowerCase();
     const cleanPass = (password || "").trim();
+    const superEmail = getSuperAdminEmail();
+    const disabledList = getDisabledAdminEmails();
+
+    // 0. Explicit rejection of disabled admin accounts
+    if (disabledList.includes(identifier)) {
+      return res.status(403).json({
+        success: false,
+        message: "This account has been permanently disabled. Access revoked.",
+      });
+    }
 
     const isAdminEmail =
-      identifier === "admin@alterainterior.com" ||
-      identifier === "admin@company.com" ||
-      identifier === "alterakitcheninteriorr@gmail.com" ||
+      identifier === superEmail ||
       identifier === "admin" ||
       identifier === "alterainterior" ||
       identifier === "emp001";
@@ -43,22 +142,30 @@ exports.login = async (req, res, next) => {
 
     if (isAdminEmail) {
       queryConditions.push(
-        { email: "admin@alterainterior.com" },
-        { email: "admin@company.com" },
+        { email: superEmail },
+        { employeeId: "EMP001" },
         { role: "SUPER_ADMIN" }
       );
     }
 
     let user = await User.findOne({ $or: queryConditions }).select("+password");
 
-    // 2. Auto-provision or repair default Super Admin account if missing
+    // 2. Reject if the matched user's email is in disabled accounts
+    if (user && disabledList.includes((user.email || "").toLowerCase())) {
+      return res.status(403).json({
+        success: false,
+        message: "This account has been permanently disabled. Access revoked.",
+      });
+    }
+
+    // 3. Auto-provision or repair default Super Admin account if missing
     if (isAdminEmail) {
       if (!user) {
         try {
-          const initPass = process.env.ADMIN_PASSWORD || cleanPass || "Admin@123456";
+          const initPass = process.env.ADMIN_PASSWORD || cleanPass || "Altera@2025!";
           user = await User.create({
             name: process.env.ADMIN_NAME || "Altera Super Admin",
-            email: identifier.includes("@") ? identifier : (process.env.ADMIN_EMAIL || "admin@company.com"),
+            email: superEmail,
             password: initPass,
             role: "SUPER_ADMIN",
             status: "ACTIVE",
@@ -70,32 +177,32 @@ exports.login = async (req, res, next) => {
           user = await User.findById(user._id).select("+password");
         } catch (err) {
           console.error("Error auto-creating admin user:", err);
-          // Fallback find if duplicate key error occurred
           user = await User.findOne({
             $or: [
               { role: "SUPER_ADMIN" },
-              { email: "admin@alterainterior.com" },
-              { email: "admin@company.com" },
+              { email: superEmail },
+              { employeeId: "EMP001" },
             ],
           }).select("+password");
         }
       }
-      if (user && (user.status !== "ACTIVE" || user.isAdminPanelEnabled === false)) {
+      if (user && (user.status !== "ACTIVE" || user.isAdminPanelEnabled === false || user.email !== superEmail)) {
+        user.email = superEmail;
         user.status = "ACTIVE";
         user.isAdminPanelEnabled = true;
         await user.save();
       }
     }
 
-    // 3. User not found
+    // 4. User not found
     if (!user) {
       return res
         .status(401)
         .json({ success: false, message: "Invalid email or password." });
     }
 
-    // 4. Check if account is active
-    if (user.status === "INACTIVE") {
+    // 5. Check if account is active
+    if (user.status === "INACTIVE" || user.status === "SUSPENDED" || user.accessStatus === "SUSPENDED") {
       return res.status(401).json({
         success: false,
         message:
@@ -106,8 +213,7 @@ exports.login = async (req, res, next) => {
     const isSuperUser =
       isAdminEmail ||
       user.role === "SUPER_ADMIN" ||
-      user.email === "admin@alterainterior.com" ||
-      user.email === "admin@company.com";
+      user.email === SUPER_ADMIN_EMAIL;
 
     // Admin panel restriction only applies if explicitly disabled for an ADMIN user
     if (user.role === "ADMIN" && user.isAdminPanelEnabled === false) {
@@ -117,7 +223,7 @@ exports.login = async (req, res, next) => {
       });
     }
 
-    // 5. Compare password securely via bcrypt
+    // 6. Compare password securely via bcrypt
     let isMatch = await user.comparePassword(cleanPass);
 
     // Auto-heal Super Admin password if it was hashed differently or created with an older password
@@ -125,6 +231,7 @@ exports.login = async (req, res, next) => {
       const allowedAdminPasswords = Array.from(
         new Set([
           process.env.ADMIN_PASSWORD,
+          "Altera@2025!",
           "Admin@123456",
           "admin123",
           "admin@123",
@@ -145,7 +252,7 @@ exports.login = async (req, res, next) => {
         .json({ success: false, message: "Invalid email or password." });
     }
 
-    // 5. Generate JWT
+    // 7. Generate JWT
     const token = generateToken(user._id);
 
     const io = req.app.get("io");
@@ -160,12 +267,8 @@ exports.login = async (req, res, next) => {
     }
 
     let effectiveRole = user.role;
-    if (
-      user.email === "admin@company.com" ||
-      user.email === "admin@alterainterior.com" ||
-      user.email === "alterakitcheninteriorr@gmail.com"
-    ) {
-      effectiveRole = user.email === "admin@company.com" ? "ADMIN" : "SUPER_ADMIN";
+    if (user.email === superEmail || user.employeeId === "EMP001" || user.role === "SUPER_ADMIN") {
+      effectiveRole = "SUPER_ADMIN";
       
       let needsSave = false;
       if (user.role !== effectiveRole) {
@@ -247,6 +350,23 @@ exports.register = async (req, res, next) => {
     const cleanEmail = email.toLowerCase().trim();
     const inputEmployeeId = req.body.employeeId ? req.body.employeeId.trim().toUpperCase() : null;
 
+    const superEmail = getSuperAdminEmail();
+    const disabledList = getDisabledAdminEmails();
+
+    // 1.5 Explicit rejection of disabled admin accounts & super admin auto-provision
+    if (disabledList.includes(cleanEmail)) {
+      return res.status(400).json({
+        success: false,
+        message: "Registration with this email address is not permitted.",
+      });
+    }
+    if (cleanEmail === superEmail) {
+      return res.status(400).json({
+        success: false,
+        message: "The Super Admin account is already provisioned. Please use Login or Forgot Password.",
+      });
+    }
+
     // 2. Check duplicate email
     const existingUser = await User.findOne({ email: cleanEmail });
     if (existingUser) {
@@ -309,9 +429,9 @@ exports.register = async (req, res, next) => {
       const adminUsers = await User.find({
         $or: [
           { role: { $in: ["ADMIN", "SUPER_ADMIN"] } },
-          { email: "admin@alterainterior.com" },
-          { email: "admin@company.com" },
+          { email: superEmail },
         ],
+        status: { $nin: ["INACTIVE", "SUSPENDED"] },
       }).select("_id");
 
       if (adminUsers && adminUsers.length > 0) {
@@ -559,6 +679,17 @@ exports.googleLogin = async (req, res, next) => {
 
     const googleId = payload.sub;
     const email = payload.email.toLowerCase().trim();
+    const superEmail = getSuperAdminEmail();
+    const disabledList = getDisabledAdminEmails();
+
+    // Explicit rejection of disabled admin accounts
+    if (disabledList.includes(email)) {
+      return res.status(403).json({
+        success: false,
+        message: "This account has been permanently disabled. Access revoked.",
+      });
+    }
+
     const name =
       payload.name ||
       `${payload.given_name || ""} ${payload.family_name || ""}`.trim() ||
@@ -613,7 +744,7 @@ exports.googleLogin = async (req, res, next) => {
     }
 
     // 4. Check if account is active & panel access enabled
-    if (user.status === "INACTIVE") {
+    if (user.status === "INACTIVE" || user.status === "SUSPENDED" || user.accessStatus === "SUSPENDED") {
       return res.status(401).json({
         success: false,
         message:
@@ -623,8 +754,7 @@ exports.googleLogin = async (req, res, next) => {
 
     const isSuperGoogleUser =
       user.role === "SUPER_ADMIN" ||
-      user.email === "admin@alterainterior.com" ||
-      user.email === "admin@company.com";
+      user.email === superEmail;
 
     if (!isSuperGoogleUser && user.isAdminPanelEnabled !== true) {
       return res.status(403).json({
@@ -701,9 +831,18 @@ exports.forgotPassword = async (req, res, next) => {
 
     const cleanInput = rawInput.toLowerCase();
     const isEmail = /^\S+@\S+\.\S+$/.test(cleanInput);
+    const superEmail = getSuperAdminEmail();
+    const disabledList = getDisabledAdminEmails();
+
+    // Explicit rejection of disabled admin accounts
+    if (disabledList.includes(cleanInput)) {
+      return res.status(403).json({
+        success: false,
+        message: "This account has been permanently disabled. Password reset is not permitted.",
+      });
+    }
 
     // 1. Locate the existing user using registered email or Employee ID
-    const envAdminEmail = (process.env.ADMIN_EMAIL || "").toLowerCase().trim();
     let queryConditions = [
       { email: cleanInput },
       { employeeId: rawInput.toUpperCase() },
@@ -715,21 +854,13 @@ exports.forgotPassword = async (req, res, next) => {
       cleanInput === "emp001" ||
       cleanInput === "admin" ||
       cleanInput === "alterainterior" ||
-      cleanInput === "admin@alterainterior.com" ||
-      cleanInput === "admin@company.com" ||
-      cleanInput === "alterakitcheninteriorr@gmail.com" ||
-      (envAdminEmail && cleanInput === envAdminEmail)
+      cleanInput === superEmail
     ) {
       queryConditions.push(
         { employeeId: "EMP001" },
-        { role: "SUPER_ADMIN" },
-        { email: "alterakitcheninteriorr@gmail.com" },
-        { email: "admin@alterainterior.com" },
-        { email: "admin@company.com" }
+        { email: superEmail },
+        { role: "SUPER_ADMIN" }
       );
-      if (envAdminEmail) {
-        queryConditions.push({ email: envAdminEmail });
-      }
     }
 
     let user = await User.findOne({ $or: queryConditions }).select(
@@ -743,18 +874,20 @@ exports.forgotPassword = async (req, res, next) => {
       return res.status(200).json(genericResponse);
     }
 
-    // If existing Super Admin (EMP001) has an old/unverified email in DB and the user
-    // requested reset using their real active admin email (e.g. alterakitcheninteriorr@gmail.com),
-    // update the existing document's email so the OTP delivers to the active inbox.
+    // Reject if found user is in disabled accounts
+    if (disabledList.includes((user.email || "").toLowerCase())) {
+      return res.status(403).json({
+        success: false,
+        message: "This account has been permanently disabled. Password reset is not permitted.",
+      });
+    }
+
+    // Ensure Super Admin email is correctly set to superEmail
     if (
       (user.role === "SUPER_ADMIN" || user.employeeId === "EMP001") &&
-      isEmail &&
-      user.email !== cleanInput &&
-      (cleanInput === "alterakitcheninteriorr@gmail.com" ||
-        cleanInput === envAdminEmail ||
-        cleanInput === "admin@alterainterior.com")
+      user.email !== superEmail
     ) {
-      user.email = cleanInput;
+      user.email = superEmail;
     }
 
     // Account status check
@@ -877,6 +1010,16 @@ exports.verifyOtp = async (req, res, next) => {
 
     const cleanInput = rawInput.toLowerCase();
     const cleanOtp = String(otp).trim();
+    const superEmail = getSuperAdminEmail();
+    const disabledList = getDisabledAdminEmails();
+
+    // Explicit rejection of disabled admin accounts
+    if (disabledList.includes(cleanInput)) {
+      return res.status(403).json({
+        success: false,
+        message: "This account has been permanently disabled. Access revoked.",
+      });
+    }
 
     if (!/^\d{6}$/.test(cleanOtp)) {
       return res.status(400).json({
@@ -886,7 +1029,6 @@ exports.verifyOtp = async (req, res, next) => {
     }
 
     // Locate user by email, employeeId, or super admin fallback
-    const envAdminEmail = (process.env.ADMIN_EMAIL || "").toLowerCase().trim();
     let queryConditions = [
       { email: cleanInput },
       { employeeId: rawInput.toUpperCase() },
@@ -896,19 +1038,13 @@ exports.verifyOtp = async (req, res, next) => {
       cleanInput === "emp001" ||
       cleanInput === "admin" ||
       cleanInput === "alterainterior" ||
-      cleanInput === "admin@alterainterior.com" ||
-      cleanInput === "admin@company.com" ||
-      cleanInput === "alterakitcheninteriorr@gmail.com" ||
-      (envAdminEmail && cleanInput === envAdminEmail)
+      cleanInput === superEmail
     ) {
       queryConditions.push(
         { employeeId: "EMP001" },
         { role: "SUPER_ADMIN" },
-        { email: "alterakitcheninteriorr@gmail.com" },
-        { email: "admin@alterainterior.com" },
-        { email: "admin@company.com" }
+        { email: superEmail }
       );
-      if (envAdminEmail) queryConditions.push({ email: envAdminEmail });
     }
 
     const user = await User.findOne({ $or: queryConditions }).select(
@@ -917,6 +1053,14 @@ exports.verifyOtp = async (req, res, next) => {
 
     if (!user || !user.resetPasswordOtp || !user.resetPasswordOtpExpire) {
       return res.status(400).json(genericInvalidMsg);
+    }
+
+    // Reject if found user is in disabled accounts
+    if (disabledList.includes((user.email || "").toLowerCase())) {
+      return res.status(403).json({
+        success: false,
+        message: "This account has been permanently disabled. Access revoked.",
+      });
     }
 
     // Role validation if expectedRole is passed
@@ -1049,6 +1193,18 @@ exports.resetPassword = async (req, res, next) => {
     ).trim();
     const { otp, resetToken, newPassword, confirmPassword } = req.body;
 
+    // Explicit rejection of disabled admin accounts
+    const rawInputClean = rawInput.toLowerCase();
+    const superEmail = getSuperAdminEmail();
+    const disabledList = getDisabledAdminEmails();
+
+    if (disabledList.includes(rawInputClean)) {
+      return res.status(403).json({
+        success: false,
+        message: "This account has been permanently disabled. Access revoked.",
+      });
+    }
+
     if (!newPassword) {
       return res.status(400).json({
         success: false,
@@ -1117,7 +1273,6 @@ exports.resetPassword = async (req, res, next) => {
 
       const cleanInput = rawInput.toLowerCase();
       const cleanOtp = String(otp).trim();
-      const envAdminEmail = (process.env.ADMIN_EMAIL || "").toLowerCase().trim();
 
       let queryConditions = [
         { email: cleanInput },
@@ -1128,19 +1283,13 @@ exports.resetPassword = async (req, res, next) => {
         cleanInput === "emp001" ||
         cleanInput === "admin" ||
         cleanInput === "alterainterior" ||
-        cleanInput === "admin@alterainterior.com" ||
-        cleanInput === "admin@company.com" ||
-        cleanInput === "alterakitcheninteriorr@gmail.com" ||
-        (envAdminEmail && cleanInput === envAdminEmail)
+        cleanInput === superEmail
       ) {
         queryConditions.push(
           { employeeId: "EMP001" },
           { role: "SUPER_ADMIN" },
-          { email: "alterakitcheninteriorr@gmail.com" },
-          { email: "admin@alterainterior.com" },
-          { email: "admin@company.com" }
+          { email: superEmail }
         );
-        if (envAdminEmail) queryConditions.push({ email: envAdminEmail });
       }
 
       user = await User.findOne({ $or: queryConditions }).select(
@@ -1198,6 +1347,14 @@ exports.resetPassword = async (req, res, next) => {
 
     if (!user) {
       return res.status(400).json(genericInvalidMsg);
+    }
+
+    // Explicit rejection if user matches disabled admin accounts
+    if (disabledList.includes((user.email || "").toLowerCase())) {
+      return res.status(403).json({
+        success: false,
+        message: "This account has been permanently disabled. Access revoked.",
+      });
     }
 
     // Role validation if expectedRole is passed

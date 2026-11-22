@@ -165,7 +165,7 @@ const recalculateProjectProgress = async (projectId) => {
 exports.getTasks = async (req, res, next) => {
   try {
     const user = req.user;
-    const isSuperOrAdmin = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.email === 'admin@alterainterior.com' || user.email === 'admin@company.com';
+    const isSuperOrAdmin = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.email === (process.env.SUPER_ADMIN_EMAIL || "alterakitcheninteriorr@gmail.com").toLowerCase();
     
     // Permission check for non-admin employees
     if (!isSuperOrAdmin) {
@@ -216,7 +216,7 @@ exports.getEmployeeTasks = async (req, res, next) => {
       return res.status(403).json({ success: false, message: 'Your account is inactive. Please contact administrator.' });
     }
 
-    const isSuperOrAdmin = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.email === 'admin@alterainterior.com' || user.email === 'admin@company.com';
+    const isSuperOrAdmin = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.email === (process.env.SUPER_ADMIN_EMAIL || "alterakitcheninteriorr@gmail.com").toLowerCase();
     const appPermissions = user.employeeAppPermissions || {};
 
     if (!isSuperOrAdmin && appPermissions.tasks !== true) {
@@ -251,7 +251,7 @@ exports.getEmployeeTasks = async (req, res, next) => {
 exports.getTask = async (req, res, next) => {
   try {
     const user = req.user;
-    const isSuperOrAdmin = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.email === 'admin@alterainterior.com' || user.email === 'admin@company.com';
+    const isSuperOrAdmin = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.email === (process.env.SUPER_ADMIN_EMAIL || "alterakitcheninteriorr@gmail.com").toLowerCase();
 
     if (!isSuperOrAdmin) {
       const appPerms = user.employeeAppPermissions || {};
@@ -422,7 +422,7 @@ exports.updateTaskProgress = async (req, res, next) => {
     }
 
     const userRole = (req.user.role || '').toUpperCase();
-    const isAdmin = userRole === 'ADMIN' || userRole === 'SUPER_ADMIN' || req.user.email === 'admin@alterainterior.com' || req.user.email === 'admin@company.com';
+    const isAdmin = userRole === 'ADMIN' || userRole === 'SUPER_ADMIN' || req.user.email === (process.env.SUPER_ADMIN_EMAIL || "alterakitcheninteriorr@gmail.com").toLowerCase();
     const isAssignee = task.assignedTo.toString() === req.user._id.toString();
 
     if (!isAdmin && !isAssignee) {
@@ -528,7 +528,17 @@ exports.updateTaskProgress = async (req, res, next) => {
       })),
     });
 
-    await task.save();
+    try {
+      await task.save();
+    } catch (saveErr) {
+      if (saveErr?.name === 'ValidationError' && saveErr.errors?.status) {
+        if (task.status === 'On Hold') task.status = 'Blocked';
+        else if (task.status === 'Pending') task.status = 'To Do';
+        await task.save();
+      } else {
+        throw saveErr;
+      }
+    }
 
     // Recalculate parent project's overall progress if linked
     let updatedProject = null;
@@ -599,7 +609,17 @@ exports.addTaskComment = async (req, res, next) => {
       text,
       createdAt: new Date(),
     });
-    await task.save();
+    try {
+      await task.save();
+    } catch (saveErr) {
+      if (saveErr?.name === 'ValidationError' && saveErr.errors?.status) {
+        if (task.status === 'On Hold') task.status = 'Blocked';
+        else if (task.status === 'Pending') task.status = 'To Do';
+        await task.save();
+      } else {
+        throw saveErr;
+      }
+    }
 
     emitSocket(req, 'task:updated', task);
 

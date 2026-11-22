@@ -46,7 +46,7 @@ const createOfferLetter = async (req, res) => {
   try {
     const userRole = (req.user?.role || '').toUpperCase();
     const userEmail = (req.user?.email || '').toLowerCase();
-    const isSuper = userRole === 'SUPER_ADMIN' || userEmail === 'admin@alterainterior.com' || userEmail === 'admin@company.com';
+    const isSuper = userRole === 'SUPER_ADMIN' || userEmail === (process.env.SUPER_ADMIN_EMAIL || "alterakitcheninteriorr@gmail.com").toLowerCase();
     const isAdmin = userRole === 'ADMIN' || userRole.includes('ADMIN') || isSuper;
 
     // Verify Admin or create permission
@@ -274,7 +274,7 @@ const updateOfferLetter = async (req, res) => {
     }
 
     const userRole = (req.user?.role || '').toUpperCase();
-    const isSuper = userRole === 'SUPER_ADMIN' || req.user?.email === 'admin@alterainterior.com' || req.user?.email === 'alterakitcheninteriorr@gmail.com';
+    const isSuper = userRole === 'SUPER_ADMIN' || req.user?.email === (process.env.SUPER_ADMIN_EMAIL || "alterakitcheninteriorr@gmail.com").toLowerCase();
 
     // Lock edit if already RELEASED or ACCEPTED unless Super Admin
     if (!isSuper && ['RELEASED', 'ACCEPTED', 'REVOKED'].includes(offerLetter.status)) {
@@ -404,7 +404,7 @@ const deleteOfferLetter = async (req, res) => {
     }
 
     const userRole = (req.user?.role || '').toUpperCase();
-    const isSuper = userRole === 'SUPER_ADMIN' || req.user?.email === 'admin@alterainterior.com' || req.user?.email === 'alterakitcheninteriorr@gmail.com';
+    const isSuper = userRole === 'SUPER_ADMIN' || req.user?.email === (process.env.SUPER_ADMIN_EMAIL || "alterakitcheninteriorr@gmail.com").toLowerCase();
 
     // Disallow normal admin deletion of official RELEASED or ACCEPTED offer letters
     if (!isSuper && (offerLetter.status === 'RELEASED' || offerLetter.status === 'ACCEPTED')) {
