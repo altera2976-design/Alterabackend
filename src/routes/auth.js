@@ -74,15 +74,16 @@ router.post(
   '/forgot-password',
   forgotPasswordLimiter,
   [
-    body('email')
-      .notEmpty()
-      .withMessage('Please provide an email.')
-      .isEmail()
-      .withMessage('Please provide a valid email address.')
-      .isLength({ max: 255 })
-      .withMessage('Email address is too long.')
-      .normalizeEmail({ gmail_remove_dots: false })
-      .trim(),
+    body().custom((value, { req }) => {
+      const input = (req.body.email || req.body.employeeId || req.body.identifier || '').trim();
+      if (!input) {
+        throw new Error('Please provide your registered email or Employee ID.');
+      }
+      if (input.length > 255) {
+        throw new Error('Input is too long.');
+      }
+      return true;
+    }),
   ],
   validate,
   authController.forgotPassword
@@ -93,15 +94,13 @@ router.post(
   '/verify-otp',
   verifyOtpLimiter,
   [
-    body('email')
-      .notEmpty()
-      .withMessage('Please provide an email.')
-      .isEmail()
-      .withMessage('Please provide a valid email address.')
-      .isLength({ max: 255 })
-      .withMessage('Email address is too long.')
-      .normalizeEmail({ gmail_remove_dots: false })
-      .trim(),
+    body().custom((value, { req }) => {
+      const input = (req.body.email || req.body.employeeId || req.body.identifier || '').trim();
+      if (!input) {
+        throw new Error('Please provide your registered email or Employee ID.');
+      }
+      return true;
+    }),
     body('otp')
       .notEmpty()
       .withMessage('Please provide the 6-digit OTP.')
@@ -121,15 +120,16 @@ router.post(
   '/reset-password',
   resetPasswordLimiter,
   [
-    body('email')
-      .notEmpty()
-      .withMessage('Please provide an email.')
-      .isEmail()
-      .withMessage('Please provide a valid email address.')
-      .isLength({ max: 255 })
-      .withMessage('Email address is too long.')
-      .normalizeEmail({ gmail_remove_dots: false })
-      .trim(),
+    body().custom((value, { req }) => {
+      const input = (req.body.email || req.body.employeeId || req.body.identifier || '').trim();
+      if (!input && !req.body.resetToken) {
+        throw new Error('Please provide email/Employee ID or resetToken.');
+      }
+      if (!req.body.otp && !req.body.resetToken) {
+        throw new Error('Please provide either verification code (OTP) or resetToken.');
+      }
+      return true;
+    }),
     body('otp')
       .optional()
       .isString()
@@ -142,12 +142,6 @@ router.post(
       .optional()
       .isString()
       .trim(),
-    body().custom((value, { req }) => {
-      if (!req.body.otp && !req.body.resetToken) {
-        throw new Error('Please provide either verification code (OTP) or resetToken.');
-      }
-      return true;
-    }),
     body('newPassword')
       .notEmpty()
       .withMessage('Please provide a new password.')

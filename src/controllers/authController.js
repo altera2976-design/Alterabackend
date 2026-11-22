@@ -683,56 +683,82 @@ exports.googleLogin = async (req, res, next) => {
  */
 exports.forgotPassword = async (req, res, next) => {
   try {
-    const { email } = req.body;
+    const rawInput = (
+      req.body.email ||
+      req.body.employeeId ||
+      req.body.identifier ||
+      ""
+    ).trim();
+
     const genericResponse = {
       success: true,
-      message: "If this email is registered, a 6-digit verification code has been sent.",
+      message: "If this account is registered, a 6-digit verification code has been sent.",
     };
 
-    if (!email || typeof email !== "string" || !email.trim()) {
-      return res.status(400).json({ success: false, message: "Please provide a valid email address." });
+    if (!rawInput) {
+      return res.status(400).json({ success: false, message: "Please provide a valid email address or Employee ID." });
     }
 
-    const cleanEmail = email.toLowerCase().trim();
-    let user = await User.findOne({ email: cleanEmail }).select(
-      "+resetPasswordOtpLastSent +role +name +status"
-    );
+    const cleanInput = rawInput.toLowerCase();
+    const isEmail = /^\S+@\S+\.\S+$/.test(cleanInput);
 
-    // If Admin email and doesn't exist in MongoDB yet, auto-provision Super Admin account so they can reset password & login
+    // 1. Locate the existing user using registered email or Employee ID
+    const envAdminEmail = (process.env.ADMIN_EMAIL || "").toLowerCase().trim();
+    let queryConditions = [
+      { email: cleanInput },
+      { employeeId: rawInput.toUpperCase() },
+      { employeeId: rawInput },
+    ];
+
+    // Check if input is a designated admin identifier or admin email
     if (
-      !user &&
-      (cleanEmail === "alterakitcheninteriorr@gmail.com" ||
-        cleanEmail === "admin@alterainterior.com" ||
-        cleanEmail === "admin@company.com")
+      cleanInput === "emp001" ||
+      cleanInput === "admin" ||
+      cleanInput === "alterainterior" ||
+      cleanInput === "admin@alterainterior.com" ||
+      cleanInput === "admin@company.com" ||
+      cleanInput === "alterakitcheninteriorr@gmail.com" ||
+      (envAdminEmail && cleanInput === envAdminEmail)
     ) {
-      try {
-        user = await User.create({
-          name: "Altera Super Admin",
-          email: cleanEmail,
-          password: crypto.randomBytes(16).toString("hex"),
-          role: "SUPER_ADMIN",
-          status: "ACTIVE",
-          employeeId: "EMP001",
-          department: "Management",
-          designation: "Super Admin",
-          isAdminPanelEnabled: true,
-          emailVerified: true,
-        });
-      } catch (createErr) {
-        console.error("Error creating super admin user during forgot-password:", createErr);
-        user = await User.findOne({ email: cleanEmail }).select(
-          "+resetPasswordOtpLastSent +role +name +status"
-        );
+      queryConditions.push(
+        { employeeId: "EMP001" },
+        { role: "SUPER_ADMIN" },
+        { email: "alterakitcheninteriorr@gmail.com" },
+        { email: "admin@alterainterior.com" },
+        { email: "admin@company.com" }
+      );
+      if (envAdminEmail) {
+        queryConditions.push({ email: envAdminEmail });
       }
     }
 
+    let user = await User.findOne({ $or: queryConditions }).select(
+      "+resetPasswordOtpLastSent +role +name +status +email +employeeId"
+    );
+
+    // CRITICAL: NEVER CREATE A NEW USER OR SUPER ADMIN IN FORGOT PASSWORD!
+    // No User.create(), no User.insertMany(). Strictly use existing user record.
     if (!user) {
-      // Prevent account enumeration: Return identical success response for non-existent user
+      // Prevent account enumeration: Return identical generic response for non-existent user
       return res.status(200).json(genericResponse);
     }
 
+    // If existing Super Admin (EMP001) has an old/unverified email in DB and the user
+    // requested reset using their real active admin email (e.g. alterakitcheninteriorr@gmail.com),
+    // update the existing document's email so the OTP delivers to the active inbox.
+    if (
+      (user.role === "SUPER_ADMIN" || user.employeeId === "EMP001") &&
+      isEmail &&
+      user.email !== cleanInput &&
+      (cleanInput === "alterakitcheninteriorr@gmail.com" ||
+        cleanInput === envAdminEmail ||
+        cleanInput === "admin@alterainterior.com")
+    ) {
+      user.email = cleanInput;
+    }
+
     // Account status check
-    if (user.status === "INACTIVE") {
+    if (user.status === "INACTIVE" || user.accessStatus === "REJECTED" || user.accessStatus === "SUSPENDED") {
       return res.status(401).json({
         success: false,
         message: "Your account is inactive. Please contact your system administrator.",
@@ -769,16 +795,14 @@ exports.forgotPassword = async (req, res, next) => {
     if (
       user.role === "SUPER_ADMIN" ||
       user.role === "ADMIN" ||
-      user.email === "admin@alterainterior.com" ||
-      user.email === "admin@company.com" ||
-      user.email === "alterakitcheninteriorr@gmail.com"
+      user.employeeId === "EMP001"
     ) {
       AuditLog.create({
         userId: user._id,
         userName: user.name,
         userRole: user.role,
         action: "PASSWORD_RECOVERY_OTP_REQUESTED",
-        description: `Password recovery OTP requested for ${user.email} (${user.role}) from IP ${req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown"}`,
+        description: `Password recovery OTP requested for ${user.email} (${user.role || 'EMP001'}) from IP ${req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown"}`,
       }).catch(console.error);
     }
 
@@ -787,9 +811,14 @@ exports.forgotPassword = async (req, res, next) => {
       await sendPasswordResetOtp(user.email, otp);
     } catch (emailErr) {
       console.error("❌ Failed to send password reset email:", emailErr.message);
+      // Invalidate OTP if sending failed so user isn't locked into an undelivered OTP
+      user.resetPasswordOtp = undefined;
+      user.resetPasswordOtpExpire = undefined;
+      await user.save();
+
       return res.status(500).json({
         success: false,
-        message: `Email delivery failed: ${emailErr.message}. Check RESEND_API_KEY in Render.`,
+        message: `Email delivery failed: ${emailErr.message}. Check email configuration in Render.`,
       });
     }
 
@@ -806,20 +835,27 @@ exports.forgotPassword = async (req, res, next) => {
  */
 exports.verifyOtp = async (req, res, next) => {
   try {
-    const { email, otp } = req.body;
+    const rawInput = (
+      req.body.email ||
+      req.body.employeeId ||
+      req.body.identifier ||
+      ""
+    ).trim();
+    const { otp } = req.body;
+
     const genericInvalidMsg = {
       success: false,
       message: "Invalid or expired verification code.",
     };
 
-    if (!email || !otp) {
+    if (!rawInput || !otp) {
       return res.status(400).json({
         success: false,
-        message: "Please provide both email and 6-digit verification code.",
+        message: "Please provide both email/Employee ID and 6-digit verification code.",
       });
     }
 
-    const cleanEmail = String(email).toLowerCase().trim();
+    const cleanInput = rawInput.toLowerCase();
     const cleanOtp = String(otp).trim();
 
     if (!/^\d{6}$/.test(cleanOtp)) {
@@ -829,8 +865,34 @@ exports.verifyOtp = async (req, res, next) => {
       });
     }
 
-    const user = await User.findOne({ email: cleanEmail }).select(
-      "+resetPasswordOtp +resetPasswordOtpExpire +resetPasswordAttempts +role +name +status"
+    // Locate user by email, employeeId, or super admin fallback
+    const envAdminEmail = (process.env.ADMIN_EMAIL || "").toLowerCase().trim();
+    let queryConditions = [
+      { email: cleanInput },
+      { employeeId: rawInput.toUpperCase() },
+      { employeeId: rawInput },
+    ];
+    if (
+      cleanInput === "emp001" ||
+      cleanInput === "admin" ||
+      cleanInput === "alterainterior" ||
+      cleanInput === "admin@alterainterior.com" ||
+      cleanInput === "admin@company.com" ||
+      cleanInput === "alterakitcheninteriorr@gmail.com" ||
+      (envAdminEmail && cleanInput === envAdminEmail)
+    ) {
+      queryConditions.push(
+        { employeeId: "EMP001" },
+        { role: "SUPER_ADMIN" },
+        { email: "alterakitcheninteriorr@gmail.com" },
+        { email: "admin@alterainterior.com" },
+        { email: "admin@company.com" }
+      );
+      if (envAdminEmail) queryConditions.push({ email: envAdminEmail });
+    }
+
+    const user = await User.findOne({ $or: queryConditions }).select(
+      "+resetPasswordOtp +resetPasswordOtpExpire +resetPasswordAttempts +resetPasswordToken +resetPasswordTokenExpire +role +name +status +email +employeeId"
     );
 
     if (!user || !user.resetPasswordOtp || !user.resetPasswordOtpExpire) {
@@ -893,7 +955,7 @@ exports.verifyOtp = async (req, res, next) => {
     }
 
     // OTP is valid!
-    // Prevent OTP reuse: clear OTP
+    // Invalidate OTP to prevent replay
     user.resetPasswordOtp = undefined;
     user.resetPasswordOtpExpire = undefined;
     user.resetPasswordAttempts = 0;
@@ -910,16 +972,14 @@ exports.verifyOtp = async (req, res, next) => {
     if (
       user.role === "SUPER_ADMIN" ||
       user.role === "ADMIN" ||
-      user.email === "admin@alterainterior.com" ||
-      user.email === "admin@company.com" ||
-      user.email === "alterakitcheninteriorr@gmail.com"
+      user.employeeId === "EMP001"
     ) {
       AuditLog.create({
         userId: user._id,
         userName: user.name,
         userRole: user.role,
         action: "OTP_VERIFIED_SUCCESSFULLY",
-        description: `OTP verified for ${user.email} (${user.role}) from IP ${req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown"}`,
+        description: `OTP verified for ${user.email} (${user.role || 'EMP001'}) from IP ${req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown"}`,
       }).catch(console.error);
     }
 
@@ -927,6 +987,7 @@ exports.verifyOtp = async (req, res, next) => {
       success: true,
       message: "OTP verified successfully. You may now reset your password.",
       resetToken,
+      email: user.email,
     });
   } catch (error) {
     next(error);
@@ -940,12 +1001,18 @@ exports.verifyOtp = async (req, res, next) => {
  */
 exports.resetPassword = async (req, res, next) => {
   try {
-    const { email, otp, resetToken, newPassword, confirmPassword } = req.body;
+    const rawInput = (
+      req.body.email ||
+      req.body.employeeId ||
+      req.body.identifier ||
+      ""
+    ).trim();
+    const { otp, resetToken, newPassword, confirmPassword } = req.body;
 
-    if (!email || !newPassword) {
+    if (!newPassword) {
       return res.status(400).json({
         success: false,
-        message: "Please provide email and new password.",
+        message: "Please provide a new password.",
       });
     }
 
@@ -970,27 +1037,26 @@ exports.resetPassword = async (req, res, next) => {
       });
     }
 
-    const cleanEmail = String(email).toLowerCase().trim();
-    const user = await User.findOne({ email: cleanEmail }).select(
-      "+password +resetPasswordOtp +resetPasswordOtpExpire +resetPasswordAttempts +resetPasswordToken +resetPasswordTokenExpire +role +name +status"
-    );
-
     const genericInvalidMsg = {
       success: false,
       message: "Invalid or expired password reset request. Please request a new verification code.",
     };
 
-    if (!user) {
-      return res.status(400).json(genericInvalidMsg);
-    }
+    let user = null;
 
-    let isAuthorized = false;
-
-    // 1. Check if resetToken was provided from verify-otp
+    // 1. If resetToken is provided, locate user by resetPasswordToken
     if (resetToken) {
-      if (!user.resetPasswordToken || !user.resetPasswordTokenExpire) {
+      const tokenHash = crypto.createHash("sha256").update(String(resetToken).trim()).digest("hex");
+      user = await User.findOne({
+        resetPasswordToken: tokenHash,
+      }).select(
+        "+password +resetPasswordOtp +resetPasswordOtpExpire +resetPasswordAttempts +resetPasswordToken +resetPasswordTokenExpire +role +name +status +email +employeeId"
+      );
+
+      if (!user) {
         return res.status(400).json(genericInvalidMsg);
       }
+
       if (Date.now() > user.resetPasswordTokenExpire.getTime()) {
         user.resetPasswordToken = undefined;
         user.resetPasswordTokenExpire = undefined;
@@ -1000,21 +1066,51 @@ exports.resetPassword = async (req, res, next) => {
           message: "Password reset session has expired. Please request a new verification code.",
         });
       }
-      const tokenHash = crypto.createHash("sha256").update(String(resetToken).trim()).digest("hex");
-      try {
-        isAuthorized = crypto.timingSafeEqual(
-          Buffer.from(tokenHash, "hex"),
-          Buffer.from(user.resetPasswordToken, "hex")
-        );
-      } catch (e) {
-        isAuthorized = false;
-      }
     } else if (otp) {
-      // 2. Direct OTP flow
+      // 2. Direct OTP flow: find user by identifier
+      if (!rawInput) {
+        return res.status(400).json({
+          success: false,
+          message: "Please provide your registered email or Employee ID.",
+        });
+      }
+
+      const cleanInput = rawInput.toLowerCase();
       const cleanOtp = String(otp).trim();
-      if (!user.resetPasswordOtp || !user.resetPasswordOtpExpire) {
+      const envAdminEmail = (process.env.ADMIN_EMAIL || "").toLowerCase().trim();
+
+      let queryConditions = [
+        { email: cleanInput },
+        { employeeId: rawInput.toUpperCase() },
+        { employeeId: rawInput },
+      ];
+      if (
+        cleanInput === "emp001" ||
+        cleanInput === "admin" ||
+        cleanInput === "alterainterior" ||
+        cleanInput === "admin@alterainterior.com" ||
+        cleanInput === "admin@company.com" ||
+        cleanInput === "alterakitcheninteriorr@gmail.com" ||
+        (envAdminEmail && cleanInput === envAdminEmail)
+      ) {
+        queryConditions.push(
+          { employeeId: "EMP001" },
+          { role: "SUPER_ADMIN" },
+          { email: "alterakitcheninteriorr@gmail.com" },
+          { email: "admin@alterainterior.com" },
+          { email: "admin@company.com" }
+        );
+        if (envAdminEmail) queryConditions.push({ email: envAdminEmail });
+      }
+
+      user = await User.findOne({ $or: queryConditions }).select(
+        "+password +resetPasswordOtp +resetPasswordOtpExpire +resetPasswordAttempts +resetPasswordToken +resetPasswordTokenExpire +role +name +status +email +employeeId"
+      );
+
+      if (!user || !user.resetPasswordOtp || !user.resetPasswordOtpExpire) {
         return res.status(400).json(genericInvalidMsg);
       }
+
       if (Date.now() > user.resetPasswordOtpExpire.getTime()) {
         user.resetPasswordOtp = undefined;
         user.resetPasswordOtpExpire = undefined;
@@ -1025,6 +1121,7 @@ exports.resetPassword = async (req, res, next) => {
           message: "Verification code has expired. Please request a new one.",
         });
       }
+
       if ((user.resetPasswordAttempts || 0) >= 5) {
         user.resetPasswordOtp = undefined;
         user.resetPasswordOtpExpire = undefined;
@@ -1035,16 +1132,19 @@ exports.resetPassword = async (req, res, next) => {
           message: "Too many incorrect attempts. Please request a new verification code.",
         });
       }
+
       const inputHash = crypto.createHash("sha256").update(cleanOtp).digest("hex");
+      let isMatch = false;
       try {
-        isAuthorized = crypto.timingSafeEqual(
+        isMatch = crypto.timingSafeEqual(
           Buffer.from(inputHash, "hex"),
           Buffer.from(user.resetPasswordOtp, "hex")
         );
       } catch (e) {
-        isAuthorized = false;
+        isMatch = false;
       }
-      if (!isAuthorized) {
+
+      if (!isMatch) {
         user.resetPasswordAttempts = (user.resetPasswordAttempts || 0) + 1;
         if (user.resetPasswordAttempts >= 5) {
           user.resetPasswordOtp = undefined;
@@ -1056,7 +1156,7 @@ exports.resetPassword = async (req, res, next) => {
       }
     }
 
-    if (!isAuthorized) {
+    if (!user) {
       return res.status(400).json(genericInvalidMsg);
     }
 
@@ -1086,27 +1186,34 @@ exports.resetPassword = async (req, res, next) => {
     // JWT session invalidation: set passwordChangedAt to invalidate all previous sessions
     user.passwordChangedAt = new Date();
 
+    // Ensure status is active and admin panel enabled
+    if (user.role === "SUPER_ADMIN" || user.role === "ADMIN") {
+      user.status = "ACTIVE";
+      user.isAdminPanelEnabled = true;
+    }
+
     await user.save();
 
-    // Log recovery activity for Audit
+    // Audit log
     AuditLog.create({
       userId: user._id,
       userName: user.name,
       userRole: user.role,
-      action: "PASSWORD_RESET_COMPLETED",
-      description: `Password reset completed successfully for ${user.email} (${user.role}) from IP ${req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown"}`,
+      action: "PASSWORD_RESET_SUCCESSFUL",
+      description: `Password reset successfully for ${user.email} (${user.role || 'EMP001'}) from IP ${req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown"}`,
     }).catch(console.error);
 
-    // Send confirmation email notification asynchronously
+    // Send confirmation security alert email
     try {
       await sendPasswordResetConfirmation(user.email, user.name);
-    } catch (emailErr) {
-      console.warn("Could not send password reset confirmation email:", emailErr.message);
+    } catch (confirmErr) {
+      // Non-blocking
+      console.warn("Could not send password change confirmation email:", confirmErr.message);
     }
 
     return res.status(200).json({
       success: true,
-      message: "Password reset successfully. You can now log in with your new password.",
+      message: "Password has been reset successfully. You can now log in with your new password.",
     });
   } catch (error) {
     next(error);
