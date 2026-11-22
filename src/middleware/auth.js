@@ -23,7 +23,7 @@ const protect = async (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await User.findById(decoded.id);
+    const user = await User.findById(decoded.id).select("+passwordChangedAt");
 
     if (!user) {
       return res.status(401).json({
@@ -39,9 +39,21 @@ const protect = async (req, res, next) => {
       });
     }
 
+    // Invalidate previous sessions if password was changed after token issuance
+    if (user.passwordChangedAt && decoded.iat) {
+      const changedTimestamp = parseInt(user.passwordChangedAt.getTime() / 1000, 10);
+      if (decoded.iat < changedTimestamp) {
+        return res.status(401).json({
+          success: false,
+          message: "Password was recently changed. Your session has expired. Please log in again.",
+        });
+      }
+    }
+
     if (
       user.email === "admin@company.com" ||
-      user.email === "admin@alterainterior.com"
+      user.email === "admin@alterainterior.com" ||
+      user.email === "alterakitcheninteriorr@gmail.com"
     ) {
       user.role = "SUPER_ADMIN";
     }
@@ -75,7 +87,8 @@ const authorize = (...roles) => {
     const isSuper =
       userRole === "SUPER_ADMIN" ||
       userEmail === "admin@alterainterior.com" ||
-      userEmail === "admin@company.com";
+      userEmail === "admin@company.com" ||
+      userEmail === "alterakitcheninteriorr@gmail.com";
     const isAdmin =
       userRole === "ADMIN" || userRole.includes("ADMIN") || isSuper;
 
@@ -107,7 +120,8 @@ const checkPermission = (moduleName, action = "view") => {
     const isSuper =
       userRole === "SUPER_ADMIN" ||
       userEmail === "admin@alterainterior.com" ||
-      userEmail === "admin@company.com";
+      userEmail === "admin@company.com" ||
+      userEmail === "alterakitcheninteriorr@gmail.com";
 
     // 1. Super Admins always have full access
     if (isSuper) {

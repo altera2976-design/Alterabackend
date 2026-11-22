@@ -5,7 +5,7 @@ const router = express.Router();
 const authController = require('../controllers/authController');
 const { protect, authorize } = require('../middleware/auth');
 const validate = require('../middleware/validate');
-const { authLimiter, forgotPasswordLimiter, resetPasswordLimiter } = require('../middleware/rateLimiter');
+const { authLimiter, forgotPasswordLimiter, resetPasswordLimiter, verifyOtpLimiter } = require('../middleware/rateLimiter');
 
 // POST /api/auth/login  (public, rate-limited)
 router.post(
@@ -88,10 +88,10 @@ router.post(
   authController.forgotPassword
 );
 
-// POST /api/auth/reset-password (public, rate-limited)
+// POST /api/auth/verify-otp (public, rate-limited)
 router.post(
-  '/reset-password',
-  resetPasswordLimiter,
+  '/verify-otp',
+  verifyOtpLimiter,
   [
     body('email')
       .notEmpty()
@@ -111,16 +111,52 @@ router.post(
       .withMessage('OTP must be exactly 6 digits.')
       .isNumeric()
       .withMessage('OTP must contain numbers only.'),
+  ],
+  validate,
+  authController.verifyOtp
+);
+
+// POST /api/auth/reset-password (public, rate-limited)
+router.post(
+  '/reset-password',
+  resetPasswordLimiter,
+  [
+    body('email')
+      .notEmpty()
+      .withMessage('Please provide an email.')
+      .isEmail()
+      .withMessage('Please provide a valid email address.')
+      .isLength({ max: 255 })
+      .withMessage('Email address is too long.')
+      .normalizeEmail({ gmail_remove_dots: false })
+      .trim(),
+    body('otp')
+      .optional()
+      .isString()
+      .trim()
+      .isLength({ min: 6, max: 6 })
+      .withMessage('OTP must be exactly 6 digits.')
+      .isNumeric()
+      .withMessage('OTP must contain numbers only.'),
+    body('resetToken')
+      .optional()
+      .isString()
+      .trim(),
+    body().custom((value, { req }) => {
+      if (!req.body.otp && !req.body.resetToken) {
+        throw new Error('Please provide either verification code (OTP) or resetToken.');
+      }
+      return true;
+    }),
     body('newPassword')
       .notEmpty()
       .withMessage('Please provide a new password.')
-      .isLength({ min: 8, max: 128 })
-      .withMessage('Password must be between 8 and 128 characters.')
-      .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]).{8,128}$/)
-      .withMessage('Password must contain at least 1 uppercase letter, 1 lowercase letter, 1 number, and 1 special character.'),
+      .isLength({ min: 6, max: 128 })
+      .withMessage('Password must be between 6 and 128 characters.'),
     body('confirmPassword')
+      .optional()
       .custom((value, { req }) => {
-        if (value !== req.body.newPassword) {
+        if (value && value !== req.body.newPassword) {
           throw new Error('New password and confirm password do not match.');
         }
         return true;

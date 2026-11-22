@@ -143,9 +143,46 @@ const generalLimiter = rateLimit({
   },
 });
 
+/**
+ * verifyOtpLimiter — applied to POST /api/auth/verify-otp.
+ * Allows max 10 attempts per 15-minute window per IP + Email combination.
+ */
+const verifyOtpLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  validate: {
+    trustProxy: false,
+    xForwardedForHeader: false,
+    ip: false,
+    default: true,
+  },
+  keyGenerator: (req) => {
+    const clientIp =
+      req.headers["x-forwarded-for"] ||
+      req.socket.remoteAddress ||
+      "unknown-ip";
+    const email =
+      req.body && req.body.email
+        ? String(req.body.email).toLowerCase().trim()
+        : "no-email";
+    return `verify_${clientIp}_${email}`;
+  },
+  handler: (req, res) => {
+    res.setHeader("Retry-After", "900");
+    res.status(429).json({
+      success: false,
+      message:
+        "Too many OTP verification attempts. Please try again after 15 minutes.",
+    });
+  },
+});
+
 module.exports = {
   authLimiter,
   forgotPasswordLimiter,
+  verifyOtpLimiter,
   resetPasswordLimiter,
   generalLimiter,
 };

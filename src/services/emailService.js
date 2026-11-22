@@ -29,8 +29,7 @@ function getResend() {
 }
 
 const FROM_ADDRESS =
-  process.env.EMAIL_FROM ||
-  '"Altera Interior" <noreply@alterainterior.com>';
+  process.env.EMAIL_FROM || '"Altera Interior" <onboarding@resend.dev>';
 
 // ─── Internal helper ────────────────────────────────────────────────────────
 
@@ -59,7 +58,9 @@ async function _send({ from, to, cc, subject, html, attachments }) {
 
   const { data, error } = await getResend().emails.send(payload);
   if (error) {
-    throw new Error(`Resend API error: ${error.message || JSON.stringify(error)}`);
+    throw new Error(
+      `Resend API error: ${error.message || JSON.stringify(error)}`,
+    );
   }
   return { success: true, messageId: data?.id };
 }
@@ -145,7 +146,10 @@ const sendReportEmail = async ({
       html,
       attachments,
     });
-    console.log("✅ Report email sent successfully. MessageId:", result.messageId);
+    console.log(
+      "✅ Report email sent successfully. MessageId:",
+      result.messageId,
+    );
     return { success: true, messageId: result.messageId };
   } catch (error) {
     console.error("❌ Error sending report email:", error.message);
@@ -226,7 +230,10 @@ const sendPayslipEmail = async ({
       html,
       attachments,
     });
-    console.log("✅ Payslip email sent successfully. MessageId:", result.messageId);
+    console.log(
+      "✅ Payslip email sent successfully. MessageId:",
+      result.messageId,
+    );
     return { success: true, messageId: result.messageId };
   } catch (error) {
     console.error("❌ Error sending payslip email:", error.message);
@@ -321,7 +328,10 @@ const sendQuotationEmail = async ({
       html,
       attachments,
     });
-    console.log("✅ Quotation email sent successfully. MessageId:", result.messageId);
+    console.log(
+      "✅ Quotation email sent successfully. MessageId:",
+      result.messageId,
+    );
     return { success: true, messageId: result.messageId };
   } catch (error) {
     console.error("❌ Error sending quotation email:", error.message);
@@ -360,12 +370,15 @@ const sendPasswordResetOtp = async (to, otp) => {
     const result = await _send({
       from:
         process.env.EMAIL_FROM ||
-        '"Altera Interior" <noreply@alterainterior.com>',
+        '"Altera Interior" <onboarding@resend.dev>',
       to,
       subject: "Your Password Reset Verification Code",
       html,
     });
-    console.log("✅ Password reset OTP email sent. MessageId:", result.messageId);
+    console.log(
+      "✅ Password reset OTP email sent. MessageId:",
+      result.messageId,
+    );
     return true;
   } catch (error) {
     console.error("❌ Error sending password reset OTP email:", error.message);
@@ -415,10 +428,16 @@ const sendPasswordResetConfirmation = async (to, name) => {
       subject: "Security Alert: Password Changed Successfully",
       html,
     });
-    console.log("✅ Password reset confirmation sent. MessageId:", result.messageId);
+    console.log(
+      "✅ Password reset confirmation sent. MessageId:",
+      result.messageId,
+    );
     return true;
   } catch (error) {
-    console.error("❌ Error sending password reset confirmation email:", error.message);
+    console.error(
+      "❌ Error sending password reset confirmation email:",
+      error.message,
+    );
     return false;
   }
 };
@@ -485,8 +504,7 @@ const sendOfferLetterEmail = async ({
 
   try {
     const result = await _send({
-      from:
-        process.env.EMAIL_FROM || '"Altera HR" <hr@alterainterior.com>',
+      from: process.env.EMAIL_FROM || '"Altera HR" <hr@alterainterior.com>',
       to,
       subject: `Employment Offer Letter (${offerLetterNumber}) - Altera Interior`,
       html,

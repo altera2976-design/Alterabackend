@@ -6,7 +6,8 @@ const { AppError } = require("../middleware/errorHandler");
 const { isPasswordCompromised } = require("../utils/hibp");
 const { OAuth2Client } = require("google-auth-library");
 const crypto = require("crypto");
-const { sendPasswordResetOtp } = require("../services/emailService");
+const { sendPasswordResetOtp, sendPasswordResetConfirmation } = require("../services/emailService");
+const AuditLog = require("../models/AuditLog");
 
 // Helper to generate a cryptographically secure 6-digit OTP
 const generateOTP = () => {
@@ -28,6 +29,7 @@ exports.login = async (req, res, next) => {
     const isAdminEmail =
       identifier === "admin@alterainterior.com" ||
       identifier === "admin@company.com" ||
+      identifier === "alterakitcheninteriorr@gmail.com" ||
       identifier === "admin" ||
       identifier === "alterainterior" ||
       identifier === "emp001";
@@ -158,7 +160,11 @@ exports.login = async (req, res, next) => {
     }
 
     let effectiveRole = user.role;
-    if (user.email === "admin@company.com" || user.email === "admin@alterainterior.com") {
+    if (
+      user.email === "admin@company.com" ||
+      user.email === "admin@alterainterior.com" ||
+      user.email === "alterakitcheninteriorr@gmail.com"
+    ) {
       effectiveRole = user.email === "admin@company.com" ? "ADMIN" : "SUPER_ADMIN";
       
       let needsSave = false;
@@ -680,37 +686,79 @@ exports.forgotPassword = async (req, res, next) => {
     const { email } = req.body;
     const genericResponse = {
       success: true,
-      message: "If the account exists, a password reset instruction has been sent.",
+      message: "If this email is registered, a 6-digit verification code has been sent.",
     };
 
     if (!email || typeof email !== "string" || !email.trim()) {
-      return res.status(400).json({ success: false, message: "Please provide a valid email." });
+      return res.status(400).json({ success: false, message: "Please provide a valid email address." });
     }
 
     const cleanEmail = email.toLowerCase().trim();
-    const user = await User.findOne({ email: cleanEmail });
+    const user = await User.findOne({ email: cleanEmail }).select(
+      "+resetPasswordOtpLastSent +role +name +status"
+    );
 
     if (!user) {
       // Prevent account enumeration: Return identical success response for non-existent user
       return res.status(200).json(genericResponse);
     }
 
+    // Account status check
+    if (user.status === "INACTIVE") {
+      return res.status(401).json({
+        success: false,
+        message: "Your account is inactive. Please contact your system administrator.",
+      });
+    }
+
+    // Resend cooldown check: 60 seconds
+    if (user.resetPasswordOtpLastSent) {
+      const timeSinceLastOtp = Date.now() - user.resetPasswordOtpLastSent.getTime();
+      if (timeSinceLastOtp < 60 * 1000) {
+        const remainingSeconds = Math.ceil((60 * 1000 - timeSinceLastOtp) / 1000);
+        return res.status(429).json({
+          success: false,
+          message: `Please wait ${remainingSeconds} seconds before requesting a new OTP.`,
+        });
+      }
+    }
+
     const otp = generateOTP();
     // Hash OTP using SHA-256 before storing in database
     const otpHash = crypto.createHash("sha256").update(otp).digest("hex");
-    const expireTime = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+    // OTP expiry: 5 minutes as required
+    const expireTime = new Date(Date.now() + 5 * 60 * 1000);
 
     user.resetPasswordOtp = otpHash;
     user.resetPasswordOtpExpire = expireTime;
     user.resetPasswordAttempts = 0;
+    user.resetPasswordOtpLastSent = new Date();
+    user.resetPasswordToken = undefined;
+    user.resetPasswordTokenExpire = undefined;
     await user.save();
+
+    // Audit Log for Super Admin or Admin recovery request
+    if (
+      user.role === "SUPER_ADMIN" ||
+      user.role === "ADMIN" ||
+      user.email === "admin@alterainterior.com" ||
+      user.email === "admin@company.com" ||
+      user.email === "alterakitcheninteriorr@gmail.com"
+    ) {
+      AuditLog.create({
+        userId: user._id,
+        userName: user.name,
+        userRole: user.role,
+        action: "PASSWORD_RECOVERY_OTP_REQUESTED",
+        description: `Password recovery OTP requested for ${user.email} (${user.role}) from IP ${req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown"}`,
+      }).catch(console.error);
+    }
 
     // Send email with plain-text OTP
     try {
       await sendPasswordResetOtp(user.email, otp);
     } catch (emailErr) {
       console.error("❌ Failed to send password reset email:", emailErr.message);
-      // Log failure internally but still return generic response to protect user privacy
     }
 
     res.status(200).json(genericResponse);
@@ -720,86 +768,313 @@ exports.forgotPassword = async (req, res, next) => {
 };
 
 /**
- * Reset Password using OTP
- * @route POST /api/auth/reset-password
+ * Verify Password Reset OTP
+ * @route POST /api/auth/verify-otp
  * @access Public
  */
-exports.resetPassword = async (req, res, next) => {
+exports.verifyOtp = async (req, res, next) => {
   try {
-    const { email, otp, newPassword, confirmPassword } = req.body;
+    const { email, otp } = req.body;
+    const genericInvalidMsg = {
+      success: false,
+      message: "Invalid or expired verification code.",
+    };
 
-    if (!email || !otp || !newPassword) {
-      return res.status(400).json({ success: false, message: "Please provide email, OTP, and new password." });
-    }
-
-    if (confirmPassword && newPassword !== confirmPassword) {
-      return res.status(400).json({ success: false, message: "New password and confirm password do not match." });
+    if (!email || !otp) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide both email and 6-digit verification code.",
+      });
     }
 
     const cleanEmail = String(email).toLowerCase().trim();
     const cleanOtp = String(otp).trim();
 
-    // Explicitly select hidden OTP fields
-    const user = await User.findOne({ email: cleanEmail }).select(
-      "+resetPasswordOtp +resetPasswordOtpExpire +resetPasswordAttempts"
-    );
+    if (!/^\d{6}$/.test(cleanOtp)) {
+      return res.status(400).json({
+        success: false,
+        message: "Verification code must be exactly 6 digits.",
+      });
+    }
 
-    const genericInvalidMsg = { success: false, message: "Invalid or expired OTP." };
+    const user = await User.findOne({ email: cleanEmail }).select(
+      "+resetPasswordOtp +resetPasswordOtpExpire +resetPasswordAttempts +role +name +status"
+    );
 
     if (!user || !user.resetPasswordOtp || !user.resetPasswordOtpExpire) {
       return res.status(400).json(genericInvalidMsg);
     }
 
-    // Check expiration
+    // Check expiration (5 minutes)
     if (Date.now() > user.resetPasswordOtpExpire.getTime()) {
       user.resetPasswordOtp = undefined;
       user.resetPasswordOtpExpire = undefined;
       user.resetPasswordAttempts = 0;
       await user.save();
-      return res.status(400).json(genericInvalidMsg);
+      return res.status(400).json({
+        success: false,
+        message: "Verification code has expired. Please request a new one.",
+      });
     }
 
-    // Check failed attempt limit (max 5 failed attempts per reset session)
+    // Check maximum attempts limit (max 5 failed attempts per session)
     if ((user.resetPasswordAttempts || 0) >= 5) {
       user.resetPasswordOtp = undefined;
       user.resetPasswordOtpExpire = undefined;
       user.resetPasswordAttempts = 0;
       await user.save();
-      return res.status(400).json(genericInvalidMsg);
+      return res.status(400).json({
+        success: false,
+        message: "Too many incorrect attempts. This verification code has been invalidated. Please request a new OTP.",
+      });
     }
 
-    // Verify OTP hash
+    // Verify OTP hash using timing-safe comparison
     const inputHash = crypto.createHash("sha256").update(cleanOtp).digest("hex");
     const storedHash = user.resetPasswordOtp;
 
     let isMatch = false;
     try {
-      isMatch = crypto.timingSafeEqual(Buffer.from(inputHash, "hex"), Buffer.from(storedHash, "hex"));
+      isMatch = crypto.timingSafeEqual(
+        Buffer.from(inputHash, "hex"),
+        Buffer.from(storedHash, "hex")
+      );
     } catch (e) {
       isMatch = false;
     }
 
     if (!isMatch) {
       user.resetPasswordAttempts = (user.resetPasswordAttempts || 0) + 1;
+      const remaining = Math.max(0, 5 - user.resetPasswordAttempts);
       if (user.resetPasswordAttempts >= 5) {
         user.resetPasswordOtp = undefined;
         user.resetPasswordOtpExpire = undefined;
         user.resetPasswordAttempts = 0;
       }
       await user.save();
-      return res.status(400).json(genericInvalidMsg);
+      return res.status(400).json({
+        success: false,
+        message: remaining > 0
+          ? `Invalid verification code. ${remaining} attempt(s) remaining.`
+          : "Too many incorrect attempts. Please request a new OTP.",
+      });
     }
 
-    // Valid match -> Update password & invalidate OTP session completely
-    user.password = newPassword;
+    // OTP is valid!
+    // Prevent OTP reuse: clear OTP
     user.resetPasswordOtp = undefined;
     user.resetPasswordOtpExpire = undefined;
     user.resetPasswordAttempts = 0;
+
+    // Issue single-use short-lived reset token (valid for 15 minutes)
+    const resetToken = crypto.randomBytes(32).toString("hex");
+    const hashedResetToken = crypto.createHash("sha256").update(resetToken).digest("hex");
+    user.resetPasswordToken = hashedResetToken;
+    user.resetPasswordTokenExpire = new Date(Date.now() + 15 * 60 * 1000);
+
     await user.save();
 
-    res.status(200).json({
+    // Log Super Admin OTP verification
+    if (
+      user.role === "SUPER_ADMIN" ||
+      user.role === "ADMIN" ||
+      user.email === "admin@alterainterior.com" ||
+      user.email === "admin@company.com" ||
+      user.email === "alterakitcheninteriorr@gmail.com"
+    ) {
+      AuditLog.create({
+        userId: user._id,
+        userName: user.name,
+        userRole: user.role,
+        action: "OTP_VERIFIED_SUCCESSFULLY",
+        description: `OTP verified for ${user.email} (${user.role}) from IP ${req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown"}`,
+      }).catch(console.error);
+    }
+
+    return res.status(200).json({
       success: true,
-      message: "Password reset successfully. You can now log in.",
+      message: "OTP verified successfully. You may now reset your password.",
+      resetToken,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Reset Password using Reset Token OR direct OTP
+ * @route POST /api/auth/reset-password
+ * @access Public
+ */
+exports.resetPassword = async (req, res, next) => {
+  try {
+    const { email, otp, resetToken, newPassword, confirmPassword } = req.body;
+
+    if (!email || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide email and new password.",
+      });
+    }
+
+    if (!resetToken && !otp) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide verification code or reset token.",
+      });
+    }
+
+    if (confirmPassword && newPassword !== confirmPassword) {
+      return res.status(400).json({
+        success: false,
+        message: "New password and confirm password do not match.",
+      });
+    }
+
+    if (String(newPassword).length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: "New password must be at least 6 characters long.",
+      });
+    }
+
+    const cleanEmail = String(email).toLowerCase().trim();
+    const user = await User.findOne({ email: cleanEmail }).select(
+      "+password +resetPasswordOtp +resetPasswordOtpExpire +resetPasswordAttempts +resetPasswordToken +resetPasswordTokenExpire +role +name +status"
+    );
+
+    const genericInvalidMsg = {
+      success: false,
+      message: "Invalid or expired password reset request. Please request a new verification code.",
+    };
+
+    if (!user) {
+      return res.status(400).json(genericInvalidMsg);
+    }
+
+    let isAuthorized = false;
+
+    // 1. Check if resetToken was provided from verify-otp
+    if (resetToken) {
+      if (!user.resetPasswordToken || !user.resetPasswordTokenExpire) {
+        return res.status(400).json(genericInvalidMsg);
+      }
+      if (Date.now() > user.resetPasswordTokenExpire.getTime()) {
+        user.resetPasswordToken = undefined;
+        user.resetPasswordTokenExpire = undefined;
+        await user.save();
+        return res.status(400).json({
+          success: false,
+          message: "Password reset session has expired. Please request a new verification code.",
+        });
+      }
+      const tokenHash = crypto.createHash("sha256").update(String(resetToken).trim()).digest("hex");
+      try {
+        isAuthorized = crypto.timingSafeEqual(
+          Buffer.from(tokenHash, "hex"),
+          Buffer.from(user.resetPasswordToken, "hex")
+        );
+      } catch (e) {
+        isAuthorized = false;
+      }
+    } else if (otp) {
+      // 2. Direct OTP flow
+      const cleanOtp = String(otp).trim();
+      if (!user.resetPasswordOtp || !user.resetPasswordOtpExpire) {
+        return res.status(400).json(genericInvalidMsg);
+      }
+      if (Date.now() > user.resetPasswordOtpExpire.getTime()) {
+        user.resetPasswordOtp = undefined;
+        user.resetPasswordOtpExpire = undefined;
+        user.resetPasswordAttempts = 0;
+        await user.save();
+        return res.status(400).json({
+          success: false,
+          message: "Verification code has expired. Please request a new one.",
+        });
+      }
+      if ((user.resetPasswordAttempts || 0) >= 5) {
+        user.resetPasswordOtp = undefined;
+        user.resetPasswordOtpExpire = undefined;
+        user.resetPasswordAttempts = 0;
+        await user.save();
+        return res.status(400).json({
+          success: false,
+          message: "Too many incorrect attempts. Please request a new verification code.",
+        });
+      }
+      const inputHash = crypto.createHash("sha256").update(cleanOtp).digest("hex");
+      try {
+        isAuthorized = crypto.timingSafeEqual(
+          Buffer.from(inputHash, "hex"),
+          Buffer.from(user.resetPasswordOtp, "hex")
+        );
+      } catch (e) {
+        isAuthorized = false;
+      }
+      if (!isAuthorized) {
+        user.resetPasswordAttempts = (user.resetPasswordAttempts || 0) + 1;
+        if (user.resetPasswordAttempts >= 5) {
+          user.resetPasswordOtp = undefined;
+          user.resetPasswordOtpExpire = undefined;
+          user.resetPasswordAttempts = 0;
+        }
+        await user.save();
+        return res.status(400).json(genericInvalidMsg);
+      }
+    }
+
+    if (!isAuthorized) {
+      return res.status(400).json(genericInvalidMsg);
+    }
+
+    // Check if new password is compromised using HIBP
+    try {
+      const isCompromised = await isPasswordCompromised(newPassword);
+      if (isCompromised) {
+        return res.status(400).json({
+          success: false,
+          message: "This password has appeared in a known data breach. Please choose a more secure password.",
+        });
+      }
+    } catch (e) {
+      // Non-blocking
+    }
+
+    // Update password (User.pre('save') hashes it securely via bcrypt)
+    user.password = newPassword;
+
+    // Single-use: Clear reset tokens and OTP fields completely to prevent replay
+    user.resetPasswordToken = undefined;
+    user.resetPasswordTokenExpire = undefined;
+    user.resetPasswordOtp = undefined;
+    user.resetPasswordOtpExpire = undefined;
+    user.resetPasswordAttempts = 0;
+
+    // JWT session invalidation: set passwordChangedAt to invalidate all previous sessions
+    user.passwordChangedAt = new Date();
+
+    await user.save();
+
+    // Log recovery activity for Audit
+    AuditLog.create({
+      userId: user._id,
+      userName: user.name,
+      userRole: user.role,
+      action: "PASSWORD_RESET_COMPLETED",
+      description: `Password reset completed successfully for ${user.email} (${user.role}) from IP ${req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown"}`,
+    }).catch(console.error);
+
+    // Send confirmation email notification asynchronously
+    try {
+      await sendPasswordResetConfirmation(user.email, user.name);
+    } catch (emailErr) {
+      console.warn("Could not send password reset confirmation email:", emailErr.message);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Password reset successfully. You can now log in with your new password.",
     });
   } catch (error) {
     next(error);
