@@ -160,4 +160,14 @@ router.post(
   authController.resetPassword
 );
 
+// GET /api/auth/superadmin/status (public)
+router.get('/superadmin/status', authController.getSuperAdminStatus);
+
+// POST /api/auth/superadmin/request-setup-otp (public, rate-limited)
+router.post(
+  '/superadmin/request-setup-otp',
+  forgotPasswordLimiter,
+  authController.requestSuperAdminSetupOtp
+);
+
 module.exports = router;

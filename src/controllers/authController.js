@@ -38,6 +38,77 @@ exports.getSuperAdminEmail = getSuperAdminEmail;
 exports.getDisabledAdminEmails = getDisabledAdminEmails;
 
 /**
+ * Securely provisions or synchronizes the Super Admin account in MongoDB.
+ * Never creates duplicate accounts.
+ */
+const ensureSuperAdminAccount = async () => {
+  const superEmail = getSuperAdminEmail();
+  let superAdmin = await User.findOne({
+    $or: [
+      { email: superEmail },
+      { employeeId: "EMP001" },
+      { role: "SUPER_ADMIN" },
+    ],
+  });
+
+  if (superAdmin) {
+    let modified = false;
+    if (superAdmin.email !== superEmail) {
+      superAdmin.email = superEmail;
+      modified = true;
+    }
+    if (superAdmin.role !== "SUPER_ADMIN") {
+      superAdmin.role = "SUPER_ADMIN";
+      modified = true;
+    }
+    if (superAdmin.status !== "ACTIVE") {
+      superAdmin.status = "ACTIVE";
+      modified = true;
+    }
+    if (superAdmin.accessStatus !== "APPROVED") {
+      superAdmin.accessStatus = "APPROVED";
+      modified = true;
+    }
+    if (superAdmin.isAdminPanelEnabled !== true) {
+      superAdmin.isAdminPanelEnabled = true;
+      modified = true;
+    }
+    if (!superAdmin.employeeId) {
+      superAdmin.employeeId = "EMP001";
+      modified = true;
+    }
+    if (!superAdmin.name) {
+      superAdmin.name = "Altera Super Admin";
+      modified = true;
+    }
+    if (modified) {
+      await superAdmin.save();
+      console.log(`👑 Super Admin synchronized: ${superEmail} (EMP001)`);
+    }
+    return superAdmin;
+  }
+
+  // Provision new Super Admin account with a secure temporary password
+  const initPass = process.env.ADMIN_PASSWORD || crypto.randomBytes(24).toString("hex") + "!A1";
+  superAdmin = await User.create({
+    name: "Altera Super Admin",
+    email: superEmail,
+    password: initPass,
+    role: "SUPER_ADMIN",
+    status: "ACTIVE",
+    accessStatus: "APPROVED",
+    employeeId: "EMP001",
+    department: "Management",
+    designation: "Super Admin",
+    isAdminPanelEnabled: true,
+  });
+  console.log(`👑 Super Admin provisioned in MongoDB: ${superEmail} (EMP001)`);
+  return superAdmin;
+};
+
+exports.ensureSuperAdminAccount = ensureSuperAdminAccount;
+
+/**
  * Startup synchronization: revokes existing admin accounts and ensures
  * SUPER_ADMIN_EMAIL is the sole active SUPER_ADMIN while preserving its password.
  */
@@ -66,40 +137,7 @@ exports.syncSuperAdminAndRevokeOldAccounts = async () => {
     }
 
     // 2. Ensure Super Admin account exists, is ACTIVE, and SUPER_ADMIN
-    let superAdmin = await User.findOne({
-      $or: [
-        { email: superEmail },
-        { employeeId: "EMP001" },
-        { role: "SUPER_ADMIN" },
-      ],
-    });
-
-    if (superAdmin) {
-      superAdmin.email = superEmail;
-      superAdmin.role = "SUPER_ADMIN";
-      superAdmin.status = "ACTIVE";
-      superAdmin.accessStatus = "APPROVED";
-      superAdmin.isAdminPanelEnabled = true;
-      if (!superAdmin.employeeId) superAdmin.employeeId = "EMP001";
-      if (!superAdmin.name) superAdmin.name = "Altera Super Admin";
-      // Existing password is strictly preserved
-      await superAdmin.save();
-      console.log(`👑 Super Admin synchronized: ${superEmail} (EMP001)`);
-    } else {
-      await User.create({
-        name: "Altera Super Admin",
-        email: superEmail,
-        password: process.env.ADMIN_PASSWORD || "Altera@2025!",
-        role: "SUPER_ADMIN",
-        status: "ACTIVE",
-        accessStatus: "APPROVED",
-        employeeId: "EMP001",
-        department: "Management",
-        designation: "Super Admin",
-        isAdminPanelEnabled: true,
-      });
-      console.log(`👑 Super Admin created: ${superEmail} (EMP001)`);
-    }
+    await ensureSuperAdminAccount();
   } catch (err) {
     console.error("⚠️ Error in syncSuperAdminAndRevokeOldAccounts:", err.message);
   }
@@ -213,7 +251,7 @@ exports.login = async (req, res, next) => {
     const isSuperUser =
       isAdminEmail ||
       user.role === "SUPER_ADMIN" ||
-      user.email === SUPER_ADMIN_EMAIL;
+      user.email === superEmail;
 
     // Admin panel restriction only applies if explicitly disabled for an ADMIN user
     if (user.role === "ADMIN" && user.isAdminPanelEnabled === false) {
@@ -849,13 +887,14 @@ exports.forgotPassword = async (req, res, next) => {
       { employeeId: rawInput },
     ];
 
-    // Check if input is a designated admin identifier or admin email
-    if (
+    const isSuperInput =
       cleanInput === "emp001" ||
       cleanInput === "admin" ||
       cleanInput === "alterainterior" ||
-      cleanInput === superEmail
-    ) {
+      cleanInput === superEmail;
+
+    // Check if input is a designated admin identifier or admin email
+    if (isSuperInput) {
       queryConditions.push(
         { employeeId: "EMP001" },
         { email: superEmail },
@@ -867,8 +906,14 @@ exports.forgotPassword = async (req, res, next) => {
       "+resetPasswordOtpLastSent +role +name +status +email +employeeId"
     );
 
-    // CRITICAL: NEVER CREATE A NEW USER OR SUPER ADMIN IN FORGOT PASSWORD!
-    // No User.create(), no User.insertMany(). Strictly use existing user record.
+    // If request is for Super Admin and account does not exist in MongoDB yet, provision it securely on-demand
+    if (!user && isSuperInput) {
+      user = await ensureSuperAdminAccount();
+      user = await User.findById(user._id).select(
+        "+resetPasswordOtpLastSent +role +name +status +email +employeeId"
+      );
+    }
+
     if (!user) {
       // Prevent account enumeration: Return identical generic response for non-existent user
       return res.status(200).json(genericResponse);
@@ -1574,5 +1619,76 @@ exports.register = async (req, res, next) => {
     });
   } catch (error) {
     next(error);
+  }
+};
+
+/**
+ * GET /api/auth/superadmin/status
+ * Check Super Admin provisioning status
+ */
+exports.getSuperAdminStatus = async (req, res, next) => {
+  try {
+    const superEmail = getSuperAdminEmail();
+    const superAdmin = await User.findOne({
+      $or: [
+        { email: superEmail },
+        { employeeId: "EMP001" },
+        { role: "SUPER_ADMIN" },
+      ],
+    }).select("name email role status accessStatus employeeId createdAt");
+
+    return res.status(200).json({
+      success: true,
+      superAdminEmail: superEmail,
+      isProvisioned: !!superAdmin,
+      superAdmin: superAdmin || null,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * POST /api/auth/superadmin/request-setup-otp
+ * Explicitly triggers Super Admin provisioning in MongoDB and dispatches a 6-digit OTP to SUPER_ADMIN_EMAIL via Resend
+ */
+exports.requestSuperAdminSetupOtp = async (req, res, next) => {
+  try {
+    const superEmail = getSuperAdminEmail();
+    const user = await ensureSuperAdminAccount();
+
+    // Resend cooldown check: 60 seconds
+    if (user.resetPasswordOtpLastSent) {
+      const timeSinceLastOtp = Date.now() - user.resetPasswordOtpLastSent.getTime();
+      if (timeSinceLastOtp < 60 * 1000) {
+        const remainingSeconds = Math.ceil((60 * 1000 - timeSinceLastOtp) / 1000);
+        return res.status(429).json({
+          success: false,
+          message: `Please wait ${remainingSeconds} seconds before requesting a new OTP.`,
+        });
+      }
+    }
+
+    const otp = generateOTP();
+    const otpHash = crypto.createHash("sha256").update(otp).digest("hex");
+    const expireTime = new Date(Date.now() + 5 * 60 * 1000);
+
+    user.resetPasswordOtp = otpHash;
+    user.resetPasswordOtpExpire = expireTime;
+    user.resetPasswordAttempts = 0;
+    user.resetPasswordOtpLastSent = new Date();
+    user.resetPasswordToken = undefined;
+    user.resetPasswordTokenExpire = undefined;
+    await user.save();
+
+    await sendPasswordResetOtp(user.email, otp);
+
+    return res.status(200).json({
+      success: true,
+      message: `Super Admin account provisioned and 6-digit verification code sent to ${user.email}.`,
+      email: user.email,
+    });
+  } catch (err) {
+    next(err);
   }
 };
