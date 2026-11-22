@@ -382,7 +382,7 @@ const sendPasswordResetOtp = async (to, otp) => {
     return true;
   } catch (error) {
     console.error("❌ Error sending password reset OTP email:", error.message);
-    return false;
+    throw error;
   }
 };
 

@@ -694,9 +694,37 @@ exports.forgotPassword = async (req, res, next) => {
     }
 
     const cleanEmail = email.toLowerCase().trim();
-    const user = await User.findOne({ email: cleanEmail }).select(
+    let user = await User.findOne({ email: cleanEmail }).select(
       "+resetPasswordOtpLastSent +role +name +status"
     );
+
+    // If Admin email and doesn't exist in MongoDB yet, auto-provision Super Admin account so they can reset password & login
+    if (
+      !user &&
+      (cleanEmail === "alterakitcheninteriorr@gmail.com" ||
+        cleanEmail === "admin@alterainterior.com" ||
+        cleanEmail === "admin@company.com")
+    ) {
+      try {
+        user = await User.create({
+          name: "Altera Super Admin",
+          email: cleanEmail,
+          password: crypto.randomBytes(16).toString("hex"),
+          role: "SUPER_ADMIN",
+          status: "ACTIVE",
+          employeeId: "EMP001",
+          department: "Management",
+          designation: "Super Admin",
+          isAdminPanelEnabled: true,
+          emailVerified: true,
+        });
+      } catch (createErr) {
+        console.error("Error creating super admin user during forgot-password:", createErr);
+        user = await User.findOne({ email: cleanEmail }).select(
+          "+resetPasswordOtpLastSent +role +name +status"
+        );
+      }
+    }
 
     if (!user) {
       // Prevent account enumeration: Return identical success response for non-existent user
@@ -759,6 +787,10 @@ exports.forgotPassword = async (req, res, next) => {
       await sendPasswordResetOtp(user.email, otp);
     } catch (emailErr) {
       console.error("❌ Failed to send password reset email:", emailErr.message);
+      return res.status(500).json({
+        success: false,
+        message: `Email delivery failed: ${emailErr.message}. Check RESEND_API_KEY in Render.`,
+      });
     }
 
     res.status(200).json(genericResponse);
