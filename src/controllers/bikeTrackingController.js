@@ -283,14 +283,33 @@ exports.stopWorkSession = async (req, res, next) => {
 // @access  Private
 exports.getActiveSession = async (req, res, next) => {
   try {
-    const activeSession = await BikeTracking.findOne({
+    const userRole = (req.user?.role || "").toUpperCase();
+    const userEmail = (req.user?.email || "").toLowerCase();
+    const isSuperOrAdmin =
+      userRole === "ADMIN" ||
+      userRole === "SUPER_ADMIN" ||
+      userEmail === "admin@company.com" ||
+      userEmail === "admin@alterainterior.com" ||
+      userEmail === "alterakitcheninteriorr@gmail.com";
+
+    let activeSession = await BikeTracking.findOne({
       employeeId: req.user.id || req.user._id,
       status: "ACTIVE",
-    });
+    }).populate("employeeId", "name email phone employeeId");
+
+    // If Admin/Super Admin doesn't have an active ride themselves, fetch the latest active employee session
+    if (!activeSession && isSuperOrAdmin) {
+      activeSession = await BikeTracking.findOne({
+        status: "ACTIVE",
+      })
+        .populate("employeeId", "name email phone employeeId")
+        .sort({ startTime: -1 });
+    }
 
     res.status(200).json({
       success: true,
       data: activeSession,
+      session: activeSession,
     });
   } catch (error) {
     console.error("Error fetching active session:", error);
@@ -303,11 +322,14 @@ exports.getActiveSession = async (req, res, next) => {
 // @access  Private (ADMIN)
 exports.getAllActiveSessions = async (req, res, next) => {
   try {
-    const activeSessions = await BikeTracking.find({ status: "ACTIVE" }).sort({ startTime: -1 });
+    const activeSessions = await BikeTracking.find({ status: "ACTIVE" })
+      .populate("employeeId", "name email phone employeeId")
+      .sort({ startTime: -1 });
     res.status(200).json({
       success: true,
       count: activeSessions.length,
       data: activeSessions,
+      sessions: activeSessions,
     });
   } catch (error) {
     console.error("Error fetching all active bike sessions:", error);
@@ -320,11 +342,19 @@ exports.getAllActiveSessions = async (req, res, next) => {
 // @access  Private (ADMIN)
 exports.getAllHistory = async (req, res, next) => {
   try {
-    const history = await BikeTracking.find({ status: "COMPLETED" }).sort({ stopTime: -1 }).limit(100);
+    const filter = { status: "COMPLETED" };
+    if (req.query.date) {
+      filter.date = req.query.date;
+    }
+    const history = await BikeTracking.find(filter)
+      .populate("employeeId", "name email phone employeeId")
+      .sort({ stopTime: -1, createdAt: -1 })
+      .limit(100);
     res.status(200).json({
       success: true,
       count: history.length,
       data: history,
+      history,
     });
   } catch (error) {
     console.error("Error fetching all bike history for admin:", error);
@@ -337,15 +367,31 @@ exports.getAllHistory = async (req, res, next) => {
 // @access  Private
 exports.getHistory = async (req, res, next) => {
   try {
-    const history = await BikeTracking.find({
-      employeeId: req.user.id || req.user._id,
-      status: "COMPLETED",
-    }).sort({ createdAt: -1 });
+    const userRole = (req.user?.role || "").toUpperCase();
+    const userEmail = (req.user?.email || "").toLowerCase();
+    const isSuperOrAdmin =
+      userRole === "ADMIN" ||
+      userRole === "SUPER_ADMIN" ||
+      userEmail === "admin@company.com" ||
+      userEmail === "admin@alterainterior.com" ||
+      userEmail === "alterakitcheninteriorr@gmail.com";
+
+    const filter = { status: "COMPLETED" };
+    // If not Admin/Super Admin, filter by user's employeeId
+    if (!isSuperOrAdmin) {
+      filter.employeeId = req.user.id || req.user._id;
+    }
+
+    const history = await BikeTracking.find(filter)
+      .populate("employeeId", "name email phone employeeId")
+      .sort({ createdAt: -1 })
+      .limit(100);
 
     res.status(200).json({
       success: true,
       count: history.length,
       data: history,
+      history,
     });
   } catch (error) {
     console.error("Error fetching history:", error);
@@ -359,12 +405,24 @@ exports.getHistory = async (req, res, next) => {
 exports.getMonthlySummary = async (req, res, next) => {
   try {
     const monthStr = req.query.month || new Date().toISOString().slice(0, 7);
-    
-    const records = await BikeTracking.find({
-      employeeId: req.user.id || req.user._id,
+    const userRole = (req.user?.role || "").toUpperCase();
+    const userEmail = (req.user?.email || "").toLowerCase();
+    const isSuperOrAdmin =
+      userRole === "ADMIN" ||
+      userRole === "SUPER_ADMIN" ||
+      userEmail === "admin@company.com" ||
+      userEmail === "admin@alterainterior.com" ||
+      userEmail === "alterakitcheninteriorr@gmail.com";
+
+    const filter = {
       status: "COMPLETED",
       date: { $regex: `^${monthStr}` },
-    });
+    };
+    if (!isSuperOrAdmin) {
+      filter.employeeId = req.user.id || req.user._id;
+    }
+
+    const records = await BikeTracking.find(filter);
 
     let totalKm = 0;
     let totalWorkingMinutes = 0;
@@ -375,17 +433,19 @@ exports.getMonthlySummary = async (req, res, next) => {
       totalKm += record.distanceKm || 0;
       totalWorkingMinutes += record.totalWorkingMinutes || 0;
       workingDaysSet.add(record.date);
-      
-      if (!bikeWiseKm[record.bikeNumber]) {
-        bikeWiseKm[record.bikeNumber] = 0;
+
+      if (record.bikeNumber) {
+        if (!bikeWiseKm[record.bikeNumber]) {
+          bikeWiseKm[record.bikeNumber] = 0;
+        }
+        bikeWiseKm[record.bikeNumber] += record.distanceKm || 0;
       }
-      bikeWiseKm[record.bikeNumber] += record.distanceKm || 0;
     });
 
     const summary = {
       totalWorkingDays: workingDaysSet.size,
-      totalWorkingHours: (totalWorkingMinutes / 60).toFixed(2),
-      totalKm,
+      totalWorkingHours: Number((totalWorkingMinutes / 60).toFixed(2)),
+      totalKm: Number(totalKm.toFixed(2)),
       numberOfSessions: records.length,
       bikeWiseKm,
     };
@@ -393,6 +453,7 @@ exports.getMonthlySummary = async (req, res, next) => {
     res.status(200).json({
       success: true,
       summary,
+      data: summary,
     });
   } catch (error) {
     console.error("Error fetching monthly summary:", error);
