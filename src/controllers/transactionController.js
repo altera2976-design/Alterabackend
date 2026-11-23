@@ -90,7 +90,8 @@ function applyFiltersAndSearch(req, baseQuery) {
     query.transactionType = transactionType;
   }
   if (paymentMethod && paymentMethod !== 'ALL') {
-    query.paymentMethod = paymentMethod;
+    const escaped = paymentMethod.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    query.paymentMethod = new RegExp(`^${escaped}$`, 'i');
   }
   if (status && status !== 'ALL') {
     query.status = status;

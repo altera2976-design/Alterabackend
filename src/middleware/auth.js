@@ -177,7 +177,28 @@ const checkPermission = (moduleName, action = "view") => {
       overtime: ["overtime", "salary", "payroll"],
       offer_letters: ["offer_letters", "offerLetters"],
       offerLetters: ["offerLetters", "offer_letters"],
+      crm: ["crm"],
+      reports: ["reports"],
     };
+
+    // Check Employee Native App Permissions (employeeAppPermissions) if defined
+    const appPerms = req.user?.employeeAppPermissions;
+    if (userRole === "EMPLOYEE" && appPerms && typeof appPerms === "object") {
+      const appPermKeys = ALIAS_MAP[moduleName] || [moduleName];
+      for (const k of appPermKeys) {
+        if (appPerms[k] !== undefined) {
+          if (appPerms[k] === false) {
+            return res.status(403).json({
+              success: false,
+              message: `Access Denied — Permission for ${moduleName} is not granted on your account.`,
+            });
+          }
+          if (appPerms[k] === true) {
+            return next();
+          }
+        }
+      }
+    }
 
     const keysToCheck = ALIAS_MAP[moduleName] || [
       moduleName,

@@ -123,7 +123,17 @@ const TransactionSchema = new mongoose.Schema(
     },
     paymentMethod: {
       type: String,
-      enum: ['Cash', 'UPI', 'Bank Transfer', 'Card', 'Razorpay', 'Other'],
+      enum: [
+        'UPI', 'upi',
+        'CASH', 'Cash', 'cash', 'Petty Cash',
+        'BANK_TRANSFER', 'Bank Transfer', 'bank_transfer', 'Bank_Transfer', 'BANK TRANSFER', 'NEFT', 'RTGS', 'IMPS',
+        'CHEQUE', 'Cheque', 'cheque',
+        'ONLINE', 'Online', 'online', 'Net Banking', 'NET_BANKING',
+        'CARD', 'Card', 'card', 'Company Card', 'Credit Card', 'Debit Card',
+        'RAZORPAY', 'Razorpay', 'razorpay',
+        'OTHER', 'Other', 'other',
+        'Pending', 'PENDING', 'pending',
+      ],
       default: 'UPI',
       index: true,
     },

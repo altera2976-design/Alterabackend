@@ -42,7 +42,15 @@ const ExpenseSchema = new mongoose.Schema(
     },
     paymentMethod: {
       type: String,
-      enum: ['Bank Transfer', 'UPI', 'Cheque', 'Petty Cash', 'Company Card'],
+      enum: [
+        'Bank Transfer', 'BANK_TRANSFER', 'Bank_Transfer',
+        'UPI', 'upi',
+        'Cheque', 'CHEQUE',
+        'Petty Cash', 'Cash', 'CASH',
+        'Company Card', 'Card', 'CARD',
+        'Online', 'ONLINE',
+        'Other', 'OTHER'
+      ],
       default: 'Bank Transfer',
     },
     receiptUrl: {

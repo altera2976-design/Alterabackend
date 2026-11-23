@@ -779,14 +779,16 @@ exports.getMyAppPermissions = async (req, res, next) => {
 
     const defaultAppPerms = {
       dashboard: true,
-      tasks: isFullAdmin ? true : false,
-      attendance: true,
-      salary: isFullAdmin ? true : false,
       crm: isFullAdmin ? true : false,
+      employees: isFullAdmin ? true : false,
+      attendance: true,
       projects: isFullAdmin ? true : false,
-      quotation: isFullAdmin ? true : false,
+      tasks: isFullAdmin ? true : false,
       reports: isFullAdmin ? true : false,
       bikeTracking: isFullAdmin ? true : false,
+      settings: true,
+      salary: isFullAdmin ? true : false,
+      quotation: isFullAdmin ? true : false,
     };
 
     const employeeAppPermissions = {
@@ -836,14 +838,16 @@ exports.getEmployeeAppPermissions = async (req, res, next) => {
 
     const defaultAppPerms = {
       dashboard: true,
-      tasks: false,
-      attendance: true,
-      salary: false,
       crm: false,
+      employees: false,
+      attendance: true,
       projects: false,
-      quotation: false,
+      tasks: false,
       reports: false,
       bikeTracking: false,
+      settings: true,
+      salary: false,
+      quotation: false,
     };
 
     const employeeAppPermissions = {
@@ -882,14 +886,16 @@ exports.updateAppPermissions = async (req, res, next) => {
 
     const currentPerms = employee.employeeAppPermissions || {
       dashboard: true,
-      tasks: false,
-      attendance: true,
-      salary: false,
       crm: false,
+      employees: false,
+      attendance: true,
       projects: false,
-      quotation: false,
+      tasks: false,
       reports: false,
       bikeTracking: false,
+      settings: true,
+      salary: false,
+      quotation: false,
     };
 
     const updatedPerms = {
@@ -897,32 +903,26 @@ exports.updateAppPermissions = async (req, res, next) => {
         permsInput.dashboard !== undefined
           ? Boolean(permsInput.dashboard)
           : Boolean(currentPerms.dashboard),
-      tasks:
-        permsInput.tasks !== undefined
-          ? Boolean(permsInput.tasks)
-          : Boolean(currentPerms.tasks),
-      attendance:
-        permsInput.attendance !== undefined
-          ? Boolean(permsInput.attendance)
-          : Boolean(currentPerms.attendance),
-      salary:
-        permsInput.salary !== undefined
-          ? Boolean(permsInput.salary)
-          : Boolean(currentPerms.salary),
       crm:
         permsInput.crm !== undefined
           ? Boolean(permsInput.crm)
           : Boolean(currentPerms.crm),
+      employees:
+        permsInput.employees !== undefined
+          ? Boolean(permsInput.employees)
+          : Boolean(currentPerms.employees),
+      attendance:
+        permsInput.attendance !== undefined
+          ? Boolean(permsInput.attendance)
+          : Boolean(currentPerms.attendance),
       projects:
         permsInput.projects !== undefined
           ? Boolean(permsInput.projects)
           : Boolean(currentPerms.projects),
-      quotation:
-        permsInput.quotation !== undefined
-          ? Boolean(permsInput.quotation)
-          : permsInput.quotations !== undefined
-            ? Boolean(permsInput.quotations)
-            : Boolean(currentPerms.quotation),
+      tasks:
+        permsInput.tasks !== undefined
+          ? Boolean(permsInput.tasks)
+          : Boolean(currentPerms.tasks),
       reports:
         permsInput.reports !== undefined
           ? Boolean(permsInput.reports)
@@ -931,6 +931,20 @@ exports.updateAppPermissions = async (req, res, next) => {
         permsInput.bikeTracking !== undefined
           ? Boolean(permsInput.bikeTracking)
           : Boolean(currentPerms.bikeTracking),
+      settings:
+        permsInput.settings !== undefined
+          ? Boolean(permsInput.settings)
+          : Boolean(currentPerms.settings ?? true),
+      salary:
+        permsInput.salary !== undefined
+          ? Boolean(permsInput.salary)
+          : Boolean(currentPerms.salary),
+      quotation:
+        permsInput.quotation !== undefined
+          ? Boolean(permsInput.quotation)
+          : permsInput.quotations !== undefined
+            ? Boolean(permsInput.quotations)
+            : Boolean(currentPerms.quotation),
     };
 
     employee.employeeAppPermissions = updatedPerms;
