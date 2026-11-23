@@ -37,19 +37,65 @@ const getDisabledAdminEmails = () => {
 exports.getSuperAdminEmail = getSuperAdminEmail;
 exports.getDisabledAdminEmails = getDisabledAdminEmails;
 
+// Helper to escape regex special characters
+const escapeRegex = (str) => String(str || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// Identifier check for Super Admin across all login / OTP endpoints
+const isSuperAdminIdentifier = (cleanInput, superEmail) => {
+  return (
+    cleanInput === superEmail ||
+    cleanInput === "alterakitcheninteriorr@gmail.com" ||
+    cleanInput === "alterakitcheninterior@gmail.com" ||
+    cleanInput === "emp001" ||
+    cleanInput === "admin" ||
+    cleanInput === "alterainterior" ||
+    cleanInput === "superadmin" ||
+    cleanInput === "super_admin"
+  );
+};
+
+// Builds a case-insensitive MongoDB query matching email or employeeId
+const getAuthUserQuery = (rawInput, superEmail) => {
+  const cleanInput = (rawInput || "").toLowerCase().trim();
+  const safeRegex = new RegExp(`^${escapeRegex(cleanInput)}$`, "i");
+  const isSuper = isSuperAdminIdentifier(cleanInput, superEmail);
+
+  const conditions = [
+    { email: cleanInput },
+    { email: safeRegex },
+    { employeeId: (rawInput || "").trim().toUpperCase() },
+    { employeeId: (rawInput || "").trim() },
+    { employeeId: new RegExp(`^${escapeRegex((rawInput || "").trim())}$`, "i") },
+  ];
+
+  if (isSuper) {
+    const safeSuper = new RegExp(`^${escapeRegex(superEmail)}$`, "i");
+    conditions.push(
+      { email: superEmail },
+      { email: safeSuper },
+      { employeeId: "EMP001" },
+      { role: "SUPER_ADMIN" }
+    );
+  }
+
+  return { query: { $or: conditions }, isSuper, cleanInput };
+};
+
 /**
  * Securely provisions or synchronizes the Super Admin account in MongoDB.
  * Never creates duplicate accounts.
  */
 const ensureSuperAdminAccount = async () => {
   const superEmail = getSuperAdminEmail();
+  const safeSuper = new RegExp(`^${escapeRegex(superEmail)}$`, "i");
   let superAdmin = await User.findOne({
     $or: [
       { email: superEmail },
+      { email: safeSuper },
       { employeeId: "EMP001" },
       { role: "SUPER_ADMIN" },
     ],
-  });
+  }).select("+password +resetPasswordOtp +resetPasswordOtpExpire +resetPasswordAttempts +resetPasswordOtpLastSent +resetPasswordToken +resetPasswordTokenExpire");
 
   if (superAdmin) {
     let modified = false;
@@ -73,7 +119,7 @@ const ensureSuperAdminAccount = async () => {
       superAdmin.isAdminPanelEnabled = true;
       modified = true;
     }
-    if (!superAdmin.employeeId) {
+    if (superAdmin.employeeId !== "EMP001") {
       superAdmin.employeeId = "EMP001";
       modified = true;
     }
@@ -165,28 +211,9 @@ exports.login = async (req, res, next) => {
       });
     }
 
-    const isAdminEmail =
-      identifier === superEmail ||
-      identifier === "admin" ||
-      identifier === "alterainterior" ||
-      identifier === "emp001";
+    const { query: queryConditions, isSuper: isAdminEmail } = getAuthUserQuery(email, superEmail);
 
-    // 1. Find user by email, phone, employeeId, or super admin fallback
-    let queryConditions = [
-      { email: identifier },
-      { phone: (email || "").trim() },
-      { employeeId: identifier.toUpperCase() },
-    ];
-
-    if (isAdminEmail) {
-      queryConditions.push(
-        { email: superEmail },
-        { employeeId: "EMP001" },
-        { role: "SUPER_ADMIN" }
-      );
-    }
-
-    let user = await User.findOne({ $or: queryConditions }).select("+password");
+    let user = await User.findOne(queryConditions).select("+password");
 
     // 2. Reject if the matched user's email is in disabled accounts
     if (user && disabledList.includes((user.email || "").toLowerCase())) {
@@ -197,37 +224,23 @@ exports.login = async (req, res, next) => {
     }
 
     // 3. Auto-provision or repair default Super Admin account if missing
-    if (isAdminEmail) {
+    if (isAdminEmail || user?.role === "SUPER_ADMIN" || user?.employeeId === "EMP001") {
       if (!user) {
-        try {
-          const initPass = process.env.ADMIN_PASSWORD || cleanPass || "Altera@2025!";
-          user = await User.create({
-            name: process.env.ADMIN_NAME || "Altera Super Admin",
-            email: superEmail,
-            password: initPass,
-            role: "SUPER_ADMIN",
-            status: "ACTIVE",
-            employeeId: "EMP001",
-            department: "Management",
-            designation: "Super Admin",
-            isAdminPanelEnabled: true,
-          });
-          user = await User.findById(user._id).select("+password");
-        } catch (err) {
-          console.error("Error auto-creating admin user:", err);
-          user = await User.findOne({
-            $or: [
-              { role: "SUPER_ADMIN" },
-              { email: superEmail },
-              { employeeId: "EMP001" },
-            ],
-          }).select("+password");
-        }
+        user = await ensureSuperAdminAccount();
+        user = await User.findById(user._id).select("+password");
       }
-      if (user && (user.status !== "ACTIVE" || user.isAdminPanelEnabled === false || user.email !== superEmail)) {
+      if (
+        user &&
+        (user.status !== "ACTIVE" ||
+          user.isAdminPanelEnabled === false ||
+          user.email !== superEmail ||
+          user.role !== "SUPER_ADMIN")
+      ) {
         user.email = superEmail;
         user.status = "ACTIVE";
+        user.accessStatus = "APPROVED";
         user.isAdminPanelEnabled = true;
+        user.role = "SUPER_ADMIN";
         await user.save();
       }
     }
@@ -867,10 +880,9 @@ exports.forgotPassword = async (req, res, next) => {
       return res.status(400).json({ success: false, message: "Please provide a valid email address or Employee ID." });
     }
 
-    const cleanInput = rawInput.toLowerCase();
-    const isEmail = /^\S+@\S+\.\S+$/.test(cleanInput);
     const superEmail = getSuperAdminEmail();
     const disabledList = getDisabledAdminEmails();
+    const { query, isSuper, cleanInput } = getAuthUserQuery(rawInput, superEmail);
 
     // Explicit rejection of disabled admin accounts
     if (disabledList.includes(cleanInput)) {
@@ -880,34 +892,12 @@ exports.forgotPassword = async (req, res, next) => {
       });
     }
 
-    // 1. Locate the existing user using registered email or Employee ID
-    let queryConditions = [
-      { email: cleanInput },
-      { employeeId: rawInput.toUpperCase() },
-      { employeeId: rawInput },
-    ];
-
-    const isSuperInput =
-      cleanInput === "emp001" ||
-      cleanInput === "admin" ||
-      cleanInput === "alterainterior" ||
-      cleanInput === superEmail;
-
-    // Check if input is a designated admin identifier or admin email
-    if (isSuperInput) {
-      queryConditions.push(
-        { employeeId: "EMP001" },
-        { email: superEmail },
-        { role: "SUPER_ADMIN" }
-      );
-    }
-
-    let user = await User.findOne({ $or: queryConditions }).select(
+    let user = await User.findOne(query).select(
       "+resetPasswordOtpLastSent +role +name +status +email +employeeId"
     );
 
     // If request is for Super Admin and account does not exist in MongoDB yet, provision it securely on-demand
-    if (!user && isSuperInput) {
+    if (!user && isSuper) {
       user = await ensureSuperAdminAccount();
       user = await User.findById(user._id).select(
         "+resetPasswordOtpLastSent +role +name +status +email +employeeId"
@@ -927,12 +917,13 @@ exports.forgotPassword = async (req, res, next) => {
       });
     }
 
-    // Ensure Super Admin email is correctly set to superEmail
-    if (
-      (user.role === "SUPER_ADMIN" || user.employeeId === "EMP001") &&
-      user.email !== superEmail
-    ) {
+    // Ensure Super Admin email is correctly set to superEmail and account is active
+    if (user.role === "SUPER_ADMIN" || user.employeeId === "EMP001" || isSuper) {
       user.email = superEmail;
+      user.role = "SUPER_ADMIN";
+      user.status = "ACTIVE";
+      user.accessStatus = "APPROVED";
+      user.isAdminPanelEnabled = true;
     }
 
     // Account status check
@@ -1053,10 +1044,10 @@ exports.verifyOtp = async (req, res, next) => {
       });
     }
 
-    const cleanInput = rawInput.toLowerCase();
     const cleanOtp = String(otp).trim();
     const superEmail = getSuperAdminEmail();
     const disabledList = getDisabledAdminEmails();
+    const { query, isSuper, cleanInput } = getAuthUserQuery(rawInput, superEmail);
 
     // Explicit rejection of disabled admin accounts
     if (disabledList.includes(cleanInput)) {
@@ -1073,26 +1064,7 @@ exports.verifyOtp = async (req, res, next) => {
       });
     }
 
-    // Locate user by email, employeeId, or super admin fallback
-    let queryConditions = [
-      { email: cleanInput },
-      { employeeId: rawInput.toUpperCase() },
-      { employeeId: rawInput },
-    ];
-    if (
-      cleanInput === "emp001" ||
-      cleanInput === "admin" ||
-      cleanInput === "alterainterior" ||
-      cleanInput === superEmail
-    ) {
-      queryConditions.push(
-        { employeeId: "EMP001" },
-        { role: "SUPER_ADMIN" },
-        { email: superEmail }
-      );
-    }
-
-    const user = await User.findOne({ $or: queryConditions }).select(
+    const user = await User.findOne(query).select(
       "+resetPasswordOtp +resetPasswordOtpExpire +resetPasswordAttempts +resetPasswordToken +resetPasswordTokenExpire +role +name +status +email +employeeId"
     );
 
@@ -1111,7 +1083,7 @@ exports.verifyOtp = async (req, res, next) => {
     // Role validation if expectedRole is passed
     const expectedRole = (req.body.expectedRole || req.body.role || "").toUpperCase().trim();
     if (expectedRole === "ADMIN" || expectedRole === "SUPER_ADMIN") {
-      const isAdminUser = user.role === "ADMIN" || user.role === "SUPER_ADMIN" || user.employeeId === "EMP001";
+      const isAdminUser = user.role === "ADMIN" || user.role === "SUPER_ADMIN" || user.employeeId === "EMP001" || isSuper;
       if (!isAdminUser) {
         return res.status(403).json({
           success: false,
@@ -1119,7 +1091,7 @@ exports.verifyOtp = async (req, res, next) => {
         });
       }
     } else if (expectedRole === "EMPLOYEE") {
-      const isAdminUser = user.role === "ADMIN" || user.role === "SUPER_ADMIN" || user.employeeId === "EMP001";
+      const isAdminUser = user.role === "ADMIN" || user.role === "SUPER_ADMIN" || user.employeeId === "EMP001" || isSuper;
       if (isAdminUser) {
         return res.status(403).json({
           success: false,
@@ -1128,8 +1100,8 @@ exports.verifyOtp = async (req, res, next) => {
       }
     }
 
-    // Check expiration (5 minutes)
-    if (Date.now() > user.resetPasswordOtpExpire.getTime()) {
+    // Check expiration (5 minutes with 30s grace period)
+    if (Date.now() > user.resetPasswordOtpExpire.getTime() + 30 * 1000) {
       user.resetPasswordOtp = undefined;
       user.resetPasswordOtpExpire = undefined;
       user.resetPasswordAttempts = 0;
@@ -1308,7 +1280,7 @@ exports.resetPassword = async (req, res, next) => {
         });
       }
     } else if (otp) {
-      // 2. Direct OTP flow: find user by identifier
+      // 2. Direct OTP flow: find user by query
       if (!rawInput) {
         return res.status(400).json({
           success: false,
@@ -1316,28 +1288,9 @@ exports.resetPassword = async (req, res, next) => {
         });
       }
 
-      const cleanInput = rawInput.toLowerCase();
       const cleanOtp = String(otp).trim();
 
-      let queryConditions = [
-        { email: cleanInput },
-        { employeeId: rawInput.toUpperCase() },
-        { employeeId: rawInput },
-      ];
-      if (
-        cleanInput === "emp001" ||
-        cleanInput === "admin" ||
-        cleanInput === "alterainterior" ||
-        cleanInput === superEmail
-      ) {
-        queryConditions.push(
-          { employeeId: "EMP001" },
-          { role: "SUPER_ADMIN" },
-          { email: superEmail }
-        );
-      }
-
-      user = await User.findOne({ $or: queryConditions }).select(
+      user = await User.findOne(query).select(
         "+password +resetPasswordOtp +resetPasswordOtpExpire +resetPasswordAttempts +resetPasswordToken +resetPasswordTokenExpire +role +name +status +email +employeeId"
       );
 
@@ -1345,7 +1298,7 @@ exports.resetPassword = async (req, res, next) => {
         return res.status(400).json(genericInvalidMsg);
       }
 
-      if (Date.now() > user.resetPasswordOtpExpire.getTime()) {
+      if (Date.now() > user.resetPasswordOtpExpire.getTime() + 30 * 1000) {
         user.resetPasswordOtp = undefined;
         user.resetPasswordOtpExpire = undefined;
         user.resetPasswordAttempts = 0;
@@ -1405,7 +1358,7 @@ exports.resetPassword = async (req, res, next) => {
     // Role validation if expectedRole is passed
     const expectedRole = (req.body.expectedRole || req.body.role || "").toUpperCase().trim();
     if (expectedRole === "ADMIN" || expectedRole === "SUPER_ADMIN") {
-      const isAdminUser = user.role === "ADMIN" || user.role === "SUPER_ADMIN" || user.employeeId === "EMP001";
+      const isAdminUser = user.role === "ADMIN" || user.role === "SUPER_ADMIN" || user.employeeId === "EMP001" || isSuper;
       if (!isAdminUser) {
         return res.status(403).json({
           success: false,
@@ -1413,13 +1366,22 @@ exports.resetPassword = async (req, res, next) => {
         });
       }
     } else if (expectedRole === "EMPLOYEE") {
-      const isAdminUser = user.role === "ADMIN" || user.role === "SUPER_ADMIN" || user.employeeId === "EMP001";
+      const isAdminUser = user.role === "ADMIN" || user.role === "SUPER_ADMIN" || user.employeeId === "EMP001" || isSuper;
       if (isAdminUser) {
         return res.status(403).json({
           success: false,
           message: "Admin accounts cannot be reset through the employee portal.",
         });
       }
+    }
+
+    // Verify & enforce SUPER_ADMIN role before password reset if super admin
+    if (isSuper || user.email === superEmail || user.employeeId === "EMP001" || user.role === "SUPER_ADMIN") {
+      user.role = "SUPER_ADMIN";
+      user.status = "ACTIVE";
+      user.accessStatus = "APPROVED";
+      user.isAdminPanelEnabled = true;
+      user.email = superEmail;
     }
 
     // Check if new password is compromised using HIBP

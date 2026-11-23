@@ -31,7 +31,7 @@ const LeadSchema = new mongoose.Schema(
     },
     leadSource: {
       type: String,
-      enum: ['Website', 'Instagram', 'Facebook', 'Referral', 'Walk-in', 'Google Ads', 'Architect / Broker', 'Other'],
+      enum: ['Website', 'Instagram', 'Facebook', 'Referral', 'Walk-in', 'Google Ads', 'Architect / Broker', 'Mobile App', 'Other'],
       default: 'Website',
     },
     requirement: {

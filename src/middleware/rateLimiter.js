@@ -51,7 +51,7 @@ const authLimiter = rateLimit({
  */
 const forgotPasswordLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5,
+  max: 30, // Increased for smooth OTP recovery
   standardHeaders: true,
   legacyHeaders: false,
   validate: {
@@ -83,11 +83,11 @@ const forgotPasswordLimiter = rateLimit({
 
 /**
  * resetPasswordLimiter — applied to POST /api/auth/reset-password.
- * Allows max 5 attempts per 15-minute window per IP + Email combination.
+ * Allows max 30 attempts per 15-minute window per IP + Email combination.
  */
 const resetPasswordLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5,
+  max: 30,
   standardHeaders: true,
   legacyHeaders: false,
   validate: {
@@ -145,11 +145,11 @@ const generalLimiter = rateLimit({
 
 /**
  * verifyOtpLimiter — applied to POST /api/auth/verify-otp.
- * Allows max 10 attempts per 15-minute window per IP + Email combination.
+ * Allows max 50 attempts per 15-minute window per IP + Email combination.
  */
 const verifyOtpLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10,
+  max: 50,
   standardHeaders: true,
   legacyHeaders: false,
   validate: {

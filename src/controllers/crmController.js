@@ -33,10 +33,38 @@ exports.getLeads = async (req, res, next) => {
 
 exports.createLead = async (req, res, next) => {
   try {
+    const { name, phone } = req.body;
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ success: false, message: 'Name is required' });
+    }
+    if (!phone || !String(phone).trim()) {
+      return res.status(400).json({ success: false, message: 'Phone is required' });
+    }
+
+    const ALLOWED_LEAD_SOURCES = [
+      'Website',
+      'Instagram',
+      'Facebook',
+      'Referral',
+      'Walk-in',
+      'Google Ads',
+      'Architect / Broker',
+      'Mobile App',
+      'Other',
+    ];
+
+    let leadSource = req.body.leadSource || 'Mobile App';
+    if (!ALLOWED_LEAD_SOURCES.includes(leadSource)) {
+      leadSource = 'Other';
+    }
+
     const count = await Lead.countDocuments();
     const leadNumber = `LD-${String(count + 1).padStart(5, '0')}`;
     const leadData = {
       ...req.body,
+      name: String(name).trim(),
+      phone: String(phone).trim(),
+      leadSource,
       leadNumber,
       stageHistory: [{ stage: req.body.status || 'New Lead', note: 'Lead initially registered' }],
     };
@@ -64,6 +92,7 @@ exports.createLead = async (req, res, next) => {
     if (io) {
       io.emit('crm_updated', { type: 'LEAD_CREATED', lead });
       io.emit('dashboard_updated', { type: 'LEAD_CREATED' });
+      io.emit('lead_added', { lead });
     }
 
     res.status(201).json({ success: true, data: lead });
