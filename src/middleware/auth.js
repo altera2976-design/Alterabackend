@@ -59,9 +59,9 @@ const protect = async (req, res, next) => {
     }
 
     if (user.status === "INACTIVE" || user.status === "SUSPENDED" || user.accessStatus === "SUSPENDED") {
-      return res.status(401).json({
+      return res.status(403).json({
         success: false,
-        message: "Your account has been deactivated. Please contact admin.",
+        message: "Your account has not been authorized by Super Admin. Please contact Super Admin.",
       });
     }
 
@@ -156,10 +156,10 @@ const checkPermission = (moduleName, action = "view") => {
     }
 
     // 3. Admin Panel Access check
-    if (req.user?.isAdminPanelEnabled === false) {
+    if (userRole === "ADMIN" && req.user?.isAdminPanelEnabled !== true) {
       return res.status(403).json({
         success: false,
-        message: "Admin Panel access has not been granted by Super Admin.",
+        message: "Your account has not been authorized by Super Admin. Please contact Super Admin.",
       });
     }
 

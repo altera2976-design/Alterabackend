@@ -254,10 +254,9 @@ exports.login = async (req, res, next) => {
 
     // 5. Check if account is active
     if (user.status === "INACTIVE" || user.status === "SUSPENDED" || user.accessStatus === "SUSPENDED") {
-      return res.status(401).json({
+      return res.status(403).json({
         success: false,
-        message:
-          "Your account has been deactivated. Please contact your administrator.",
+        message: "Your account has not been authorized by Super Admin. Please contact Super Admin.",
       });
     }
 
@@ -266,12 +265,14 @@ exports.login = async (req, res, next) => {
       user.role === "SUPER_ADMIN" ||
       user.email === superEmail;
 
-    // Admin panel restriction only applies if explicitly disabled for an ADMIN user
-    if (user.role === "ADMIN" && user.isAdminPanelEnabled === false) {
-      return res.status(403).json({
-        success: false,
-        message: "Admin Panel access has not been granted by Super Admin.",
-      });
+    // Admin panel restriction: Super Admin MUST have granted dashboard access
+    if (user.role === "ADMIN" && !isSuperUser) {
+      if (user.isAdminPanelEnabled !== true || user.status !== "ACTIVE") {
+        return res.status(403).json({
+          success: false,
+          message: "Your account has not been authorized by Super Admin. Please contact Super Admin.",
+        });
+      }
     }
 
     // 6. Compare password securely via bcrypt
