@@ -36,7 +36,15 @@ const VendorPaymentSchema = new mongoose.Schema(
     },
     paymentMethod: {
       type: String,
-      enum: ['Bank Transfer (NEFT/RTGS)', 'UPI', 'Cheque', 'Cash'],
+      enum: [
+        'Bank Transfer (NEFT/RTGS)', 'Bank Transfer', 'BANK_TRANSFER',
+        'UPI', 'upi',
+        'Cheque', 'CHEQUE', 'cheque',
+        'Cash', 'CASH', 'cash',
+        'ONLINE', 'Online', 'online', 'Net Banking',
+        'Card', 'CARD',
+        'Other', 'OTHER',
+      ],
       default: 'Bank Transfer (NEFT/RTGS)',
     },
     paymentDate: {

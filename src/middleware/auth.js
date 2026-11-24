@@ -177,8 +177,19 @@ const checkPermission = (moduleName, action = "view") => {
       overtime: ["overtime", "salary", "payroll"],
       offer_letters: ["offer_letters", "offerLetters"],
       offerLetters: ["offerLetters", "offer_letters"],
-      crm: ["crm"],
-      reports: ["reports"],
+      crm: ["crm", "crm_leads", "crm_customers", "crm_clients", "crm_followups", "crm_pipeline", "crm_consultations", "crm_campaigns", "crm_team", "crm_settings"],
+      crm_leads: ["crm_leads", "crm"],
+      crm_customers: ["crm_customers", "crm_clients", "clients", "crm"],
+      crm_clients: ["crm_clients", "crm_customers", "clients", "crm"],
+      crm_followups: ["crm_followups", "crm"],
+      crm_pipeline: ["crm_pipeline", "crm"],
+      crm_consultations: ["crm_consultations", "crm"],
+      crm_tasks: ["crm_tasks", "tasks", "crm"],
+      crm_reports: ["crm_reports", "reports", "crm"],
+      crm_campaigns: ["crm_campaigns", "crm"],
+      crm_team: ["crm_team", "crm"],
+      crm_settings: ["crm_settings", "administration", "crm"],
+      reports: ["reports", "crm_reports"],
     };
 
     // Check Employee Native App Permissions (employeeAppPermissions) if defined

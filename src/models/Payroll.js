@@ -79,7 +79,16 @@ const PayrollSchema = new mongoose.Schema(
       paymentDate: { type: Date },
       paymentMethod: {
         type: String,
-        enum: ['BANK_TRANSFER', 'CASH', 'UPI', 'CHEQUE', 'PENDING'],
+        enum: [
+          'BANK_TRANSFER', 'Bank Transfer', 'bank_transfer',
+          'CASH', 'Cash', 'cash',
+          'UPI', 'upi',
+          'CHEQUE', 'Cheque', 'cheque',
+          'ONLINE', 'Online', 'online', 'Net Banking',
+          'CARD', 'Card',
+          'PENDING', 'Pending', 'pending',
+          'OTHER', 'Other',
+        ],
         default: 'PENDING',
       },
       transactionId: { type: String, default: '' },

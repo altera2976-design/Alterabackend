@@ -318,7 +318,10 @@ exports.updateEmployee = async (req, res, next) => {
     }
     if (isAdminPanelEnabled !== undefined)
       user.isAdminPanelEnabled = Boolean(isAdminPanelEnabled);
-    if (permissions !== undefined) user.permissions = permissions;
+    if (permissions !== undefined) {
+      user.permissions = permissions;
+      user.markModified('permissions');
+    }
     if (password && password.length >= 6) {
       user.password = password; // Pre-save hook will hash password automatically with bcryptjs
     }

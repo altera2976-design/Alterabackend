@@ -187,8 +187,43 @@ const TransactionSchema = new mongoose.Schema(
   }
 );
 
-// Auto-normalize status to Title Case ('Completed', 'Pending', 'Failed', 'Cancelled', 'Refunded')
+// Auto-normalize paymentMethod and status to safe values
 TransactionSchema.pre('validate', function (next) {
+  if (this.paymentMethod && typeof this.paymentMethod === 'string') {
+    const raw = this.paymentMethod.trim();
+    const upper = raw.toUpperCase().replace(/[\s\-_]+/g, '');
+    if (upper === 'ONLINE' || upper === 'NETBANKING' || upper === 'NETBANK' || upper === 'INTERNETBANKING') {
+      this.paymentMethod = 'ONLINE';
+    } else if (upper === 'UPI') {
+      this.paymentMethod = 'UPI';
+    } else if (upper === 'CASH' || upper === 'PETTYCASH') {
+      this.paymentMethod = 'CASH';
+    } else if (upper === 'BANKTRANSFER' || upper === 'NEFT' || upper === 'RTGS' || upper === 'IMPS') {
+      this.paymentMethod = 'BANK_TRANSFER';
+    } else if (upper === 'CHEQUE' || upper === 'CHECK') {
+      this.paymentMethod = 'CHEQUE';
+    } else if (upper === 'CARD' || upper === 'CREDITCARD' || upper === 'DEBITCARD') {
+      this.paymentMethod = 'CARD';
+    } else if (upper === 'RAZORPAY') {
+      this.paymentMethod = 'RAZORPAY';
+    } else {
+      const allowed = [
+        'UPI', 'upi',
+        'CASH', 'Cash', 'cash', 'Petty Cash',
+        'BANK_TRANSFER', 'Bank Transfer', 'bank_transfer', 'Bank_Transfer', 'BANK TRANSFER', 'NEFT', 'RTGS', 'IMPS',
+        'CHEQUE', 'Cheque', 'cheque',
+        'ONLINE', 'Online', 'online', 'Net Banking', 'NET_BANKING',
+        'CARD', 'Card', 'card', 'Company Card', 'Credit Card', 'Debit Card',
+        'RAZORPAY', 'Razorpay', 'razorpay',
+        'OTHER', 'Other', 'other',
+        'Pending', 'PENDING', 'pending',
+      ];
+      this.paymentMethod = allowed.includes(raw) ? raw : 'ONLINE';
+    }
+  } else {
+    this.paymentMethod = 'UPI';
+  }
+
   if (this.status && typeof this.status === 'string') {
     const s = this.status.trim().toUpperCase();
     if (['COMPLETED', 'PAID', 'SUCCESS', 'SUCCESSFUL'].includes(s)) {
