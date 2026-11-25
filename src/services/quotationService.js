@@ -466,6 +466,7 @@ async function convertQuotationToProject(quotation, user) {
     projectId: projectIdStr,
     name: quotation.projectTitle || `${clientName} Interior`,
     client: clientName,
+    projectType: Project.normalizeProjectType ? Project.normalizeProjectType(quotation.projectType) : (quotation.projectType || 'Interior'),
     value: quotation.pricing?.grandTotal || 0,
     status: 'Planning',
     progress: 10,

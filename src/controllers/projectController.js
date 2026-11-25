@@ -163,6 +163,7 @@ exports.createProject = async (req, res, next) => {
     const projectData = {
       ...req.body,
       projectId,
+      projectType: Project.normalizeProjectType ? Project.normalizeProjectType(req.body.projectType) : (req.body.projectType || 'Interior'),
       createdBy: req.user._id,
     };
 
@@ -623,7 +624,7 @@ exports.convertQuotationToProject = async (req, res, next) => {
         email: quotation.client.email || '',
       },
       projectAddress: quotation.siteLocation || quotation.client.address || '',
-      projectType: quotation.projectType || 'Interior',
+      projectType: Project.normalizeProjectType ? Project.normalizeProjectType(quotation.projectType) : (quotation.projectType || 'Interior'),
       quotationId: quotation._id,
       quotationNumber: quotation.quotationNumber,
       value: quotation.grandTotal || 0,

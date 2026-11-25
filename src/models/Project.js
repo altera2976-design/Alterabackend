@@ -1,5 +1,112 @@
 const mongoose = require('mongoose');
 
+const VALID_PROJECT_TYPES = [
+  'Interior',
+  'Architecture',
+  'Renovation',
+  'Commercial',
+  'Residential',
+  'Modular Kitchen',
+  'Modular Wardrobe',
+  'Wardrobe/Kitchen',
+  'Modular Work',
+  'Turnkey Interior',
+  'Other',
+];
+
+function normalizeProjectType(val) {
+  if (!val || typeof val !== 'string') return 'Interior';
+  const clean = val.trim();
+  const lower = clean.toLowerCase();
+
+  // Direct case-insensitive match
+  const directMatch = VALID_PROJECT_TYPES.find(
+    (t) => t.toLowerCase() === lower
+  );
+  if (directMatch) return directMatch;
+
+  // Composite & specific alias mappings
+  if (
+    (lower.includes('wardrobe') && lower.includes('kitchen')) ||
+    lower.includes('wardrobe/kitchen') ||
+    lower.includes('kitchen/wardrobe') ||
+    lower.includes('wardrobe / kitchen') ||
+    lower.includes('kitchen / wardrobe')
+  ) {
+    return 'Wardrobe/Kitchen';
+  }
+
+  if (lower.includes('modular') && lower.includes('kitchen')) {
+    return 'Modular Kitchen';
+  }
+
+  if (
+    lower.includes('modular') &&
+    (lower.includes('wardrobe') || lower.includes('closet'))
+  ) {
+    return 'Modular Wardrobe';
+  }
+
+  if (lower === 'wardrobe' || lower === 'wardrobes' || lower.includes('wardrobe')) {
+    return 'Modular Wardrobe';
+  }
+
+  if (lower === 'kitchen' || lower.includes('kitchen')) {
+    return 'Modular Kitchen';
+  }
+
+  if (
+    lower.includes('modular') &&
+    (lower.includes('work') || lower.includes('works') || lower === 'modular')
+  ) {
+    return 'Modular Work';
+  }
+
+  if (
+    lower.includes('residential') ||
+    lower.includes('villa') ||
+    lower.includes('flat') ||
+    lower.includes('apartment') ||
+    lower.includes('home')
+  ) {
+    return 'Residential';
+  }
+
+  if (
+    lower.includes('commercial') ||
+    lower.includes('office') ||
+    lower.includes('retail') ||
+    lower.includes('shop') ||
+    lower.includes('store') ||
+    lower.includes('restaurant')
+  ) {
+    return 'Commercial';
+  }
+
+  if (
+    lower.includes('renovat') ||
+    lower.includes('civil') ||
+    lower.includes('remodel') ||
+    lower.includes('restoration')
+  ) {
+    return 'Renovation';
+  }
+
+  if (lower.includes('architect')) {
+    return 'Architecture';
+  }
+
+  if (lower.includes('turnkey')) {
+    return 'Turnkey Interior';
+  }
+
+  if (lower.includes('interior')) {
+    return 'Interior';
+  }
+
+  return 'Other';
+}
+
 const ProjectSchema = new mongoose.Schema(
   {
     projectId: {
@@ -28,7 +135,8 @@ const ProjectSchema = new mongoose.Schema(
     },
     projectType: {
       type: String,
-      enum: ['Interior', 'Architecture', 'Renovation', 'Commercial', 'Residential', 'Modular Kitchen', 'Other'],
+      set: normalizeProjectType,
+      enum: VALID_PROJECT_TYPES,
       default: 'Interior',
     },
     quotationId: {
@@ -182,6 +290,19 @@ ProjectSchema.methods.toEmployeeJSON = function () {
   delete obj.value;
   return obj;
 };
+
+// Normalize projectType before validation
+ProjectSchema.pre('validate', function (next) {
+  if (this.projectType) {
+    this.projectType = normalizeProjectType(this.projectType);
+  } else {
+    this.projectType = 'Interior';
+  }
+  if (typeof next === 'function') next();
+});
+
+ProjectSchema.statics.normalizeProjectType = normalizeProjectType;
+ProjectSchema.statics.VALID_PROJECT_TYPES = VALID_PROJECT_TYPES;
 
 ProjectSchema.index({ 'assignedTeam.userId': 1 });
 ProjectSchema.index({ 'projectManager.userId': 1 });
