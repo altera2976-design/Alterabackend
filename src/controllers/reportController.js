@@ -3,6 +3,7 @@ const User = require('../models/User');
 const Attendance = require('../models/Attendance');
 const Client = require('../models/Client');
 const Trip = require('../models/Trip');
+const BikeTracking = require('../models/BikeTracking');
 const Payroll = require('../models/Payroll');
 const Lead = require('../models/Lead');
 const Quotation = require('../models/Quotation');
@@ -70,9 +71,9 @@ exports.getReportData = async (req, res, next) => {
     const currentProjects = await Project.find({
       $or: [
         { createdAt: { $gte: start, $lte: end } },
-        { startDate: new RegExp(periodLabel, 'i') }
+        { startDate: { $gte: start, $lte: end } }
       ]
-    });
+    }).lean();
     const totalRevenue = currentProjects.reduce((acc, p) => acc + (p.value || 0), 0);
 
     // Previous period projects for comparison
@@ -80,7 +81,7 @@ exports.getReportData = async (req, res, next) => {
       $or: [
         { createdAt: { $gte: prevStart, $lte: prevEnd } }
       ]
-    });
+    }).lean();
     const previousRevenue = prevProjects.reduce((acc, p) => acc + (p.value || 0), 0);
 
     // Percentage comparison calculation
@@ -100,7 +101,7 @@ exports.getReportData = async (req, res, next) => {
     const projectsCount = await Project.countDocuments({
       $or: [
         { createdAt: { $gte: start, $lte: end } },
-        { startDate: new RegExp(periodLabel, 'i') }
+        { startDate: { $gte: start, $lte: end } }
       ]
     });
 
@@ -120,15 +121,29 @@ exports.getReportData = async (req, res, next) => {
     });
 
     // Expenses and Payments
-    const tripsInPeriod = await Trip.find({
+    let totalBikeExpense = 0;
+    const bikeTrips = await BikeTracking.find({
       $or: [
-        { date: { $gte: start, $lte: end } },
+        { date: { $gte: startStr, $lte: endStr } },
         { createdAt: { $gte: start, $lte: end } }
       ],
       status: 'COMPLETED'
-    });
-    const totalBikeExpense = tripsInPeriod.reduce((acc, t) => acc + (t.totalExpense || 0), 0);
-    const paymentsCount = projectsCount + tripsInPeriod.length;
+    }).select('-locationHistory').lean();
+
+    if (bikeTrips && bikeTrips.length > 0) {
+      totalBikeExpense = bikeTrips.reduce((acc, t) => acc + (t.totalExpense || (t.distanceKm ? t.distanceKm * 3.5 : 0)), 0);
+    } else {
+      const tripsInPeriod = await Trip.find({
+        $or: [
+          { date: { $gte: start, $lte: end } },
+          { createdAt: { $gte: start, $lte: end } }
+        ],
+        status: 'COMPLETED'
+      }).lean();
+      totalBikeExpense = tripsInPeriod.reduce((acc, t) => acc + (t.totalExpense || 0), 0);
+    }
+    const tripsCount = bikeTrips && bikeTrips.length > 0 ? bikeTrips.length : 0;
+    const paymentsCount = projectsCount + tripsCount;
 
     // Mini chart distribution bars (4 weekly blocks)
     const quarterMs = (end.getTime() - start.getTime()) / 4;

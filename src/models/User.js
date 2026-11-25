@@ -236,6 +236,10 @@ UserSchema.set("toJSON", {
   },
 });
 
+UserSchema.index({ role: 1, status: 1 });
+UserSchema.index({ status: 1 });
+UserSchema.index({ createdAt: -1 });
+
 if (mongoose.models && mongoose.models.User) {
   delete mongoose.models.User;
 }

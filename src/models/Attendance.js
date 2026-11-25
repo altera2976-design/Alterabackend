@@ -101,7 +101,10 @@ const AttendanceSchema = new mongoose.Schema(
     },
     leaveType: {
       type: String,
-      enum: ['PAID', 'UNPAID', 'CASUAL', 'SICK', 'ANNUAL', 'MATERNITY', 'PATERNITY'],
+      enum: [
+        'PAID', 'UNPAID', 'CASUAL', 'SICK', 'ANNUAL', 'MATERNITY', 'PATERNITY',
+        'Casual Leave (CL)', 'Sick Leave (SL)', 'Privilege / Earned Leave (PL)', 'Unpaid Leave (LWP)', 'Compensatory Off (CO)'
+      ],
       default: 'PAID',
     },
     leaveReason: {
@@ -142,7 +145,22 @@ const AttendanceSchema = new mongoose.Schema(
   }
 );
 
+// Normalize leaveType before validation
+AttendanceSchema.pre('validate', function (next) {
+  if (this.leaveType && typeof this.leaveType === 'string') {
+    const raw = this.leaveType.trim();
+    if (raw.includes('Casual') || raw.toUpperCase() === 'CASUAL') this.leaveType = 'CASUAL';
+    else if (raw.includes('Sick') || raw.toUpperCase() === 'SICK') this.leaveType = 'SICK';
+    else if (raw.includes('Privilege') || raw.includes('Earned') || raw.toUpperCase() === 'ANNUAL') this.leaveType = 'ANNUAL';
+    else if (raw.includes('Unpaid') || raw.includes('LWP') || raw.toUpperCase() === 'UNPAID') this.leaveType = 'UNPAID';
+    else if (raw.includes('Compensatory') || raw.toUpperCase() === 'PAID') this.leaveType = 'PAID';
+  }
+  if (typeof next === 'function') next();
+});
+
 // A user can only have one attendance record per day
 AttendanceSchema.index({ userId: 1, date: 1 }, { unique: true });
+AttendanceSchema.index({ date: 1 });
+AttendanceSchema.index({ status: 1, date: 1 });
 
 module.exports = mongoose.model('Attendance', AttendanceSchema);

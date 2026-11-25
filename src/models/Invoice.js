@@ -13,7 +13,15 @@ const PaymentRecordSchema = new mongoose.Schema({
   paymentDate: { type: Date, default: Date.now },
   method: {
     type: String,
-    enum: ['Bank Transfer (NEFT/RTGS)', 'UPI', 'Cheque', 'Credit Card', 'Cash'],
+    enum: [
+      'Bank Transfer (NEFT/RTGS)', 'Bank Transfer', 'BANK_TRANSFER', 'bank_transfer',
+      'UPI', 'upi',
+      'Cheque', 'CHEQUE', 'cheque',
+      'Credit Card', 'Debit Card', 'Card', 'CARD', 'card',
+      'Cash', 'CASH', 'cash', 'Petty Cash',
+      'ONLINE', 'Online', 'online', 'Net Banking', 'NET_BANKING',
+      'Other', 'OTHER', 'other',
+    ],
     default: 'Bank Transfer (NEFT/RTGS)',
   },
   transactionRef: { type: String, default: '' },

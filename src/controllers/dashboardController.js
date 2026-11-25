@@ -14,6 +14,11 @@ const LeaveRequest = require('../models/LeaveRequest');
 const BikeTracking = require('../models/BikeTracking');
 const OfferLetter = require('../models/OfferLetter');
 
+// High-speed in-memory cache to prevent 19 concurrent aggregations on rapid hits
+let adminDashboardCache = null;
+let adminDashboardCacheTime = 0;
+const ADMIN_CACHE_TTL = 15 * 1000; // 15 seconds TTL
+
 exports.getDashboardStats = async (req, res, next) => {
   try {
     const user = req.user;
@@ -25,6 +30,13 @@ exports.getDashboardStats = async (req, res, next) => {
     // 1. ADMIN DASHBOARD STATS (OPTIMIZED AGGREGATIONS)
     // ==========================================
     if (isAdmin) {
+      if (
+        adminDashboardCache &&
+        now.getTime() - adminDashboardCacheTime < ADMIN_CACHE_TTL &&
+        req.query.refresh !== 'true'
+      ) {
+        return res.status(200).json(adminDashboardCache);
+      }
       const [
         totalEmployees,
         activeEmployees,
@@ -97,8 +109,8 @@ exports.getDashboardStats = async (req, res, next) => {
 
         Lead.find().sort({ createdAt: -1 }).limit(5).lean(),
         Task.find({ status: { $ne: 'Completed' } }).sort({ dueDate: 1 }).limit(5).lean(),
-        BikeTracking.find({ status: 'ACTIVE' }).sort({ startTime: -1 }).lean(),
-        BikeTracking.find({ status: 'COMPLETED' }).sort({ stopTime: -1 }).limit(20).lean(),
+        BikeTracking.find({ status: 'ACTIVE' }).select('-locationHistory').sort({ startTime: -1 }).lean(),
+        BikeTracking.find({ status: 'COMPLETED' }).select('-locationHistory').sort({ stopTime: -1 }).limit(20).lean(),
 
         // 6. Payroll total aggregation
         Payroll.aggregate([
@@ -293,7 +305,7 @@ exports.getDashboardStats = async (req, res, next) => {
         { stage: 'Converted', count: convertedLeads },
       ];
 
-      return res.status(200).json({
+      const adminResponseData = {
         success: true,
         role: 'ADMIN',
         data: {
@@ -355,7 +367,12 @@ exports.getDashboardStats = async (req, res, next) => {
           upcomingTasks: upcomingTasksList,
           recentActivities,
         },
-      });
+      };
+
+      adminDashboardCache = adminResponseData;
+      adminDashboardCacheTime = Date.now();
+
+      return res.status(200).json(adminResponseData);
     }
 
     // ==========================================
@@ -371,13 +388,22 @@ exports.getDashboardStats = async (req, res, next) => {
       myAuditLogs,
       monthlyAttendances,
     ] = await Promise.all([
-      Project.find({ 'members.user': user._id }).sort({ updatedAt: -1 }).limit(5).lean(),
+      Project.find({
+        $or: [
+          { 'assignedTeam.userId': user._id },
+          { 'projectManager.userId': user._id },
+          { createdBy: user._id }
+        ]
+      }).sort({ updatedAt: -1 }).limit(5).lean(),
       Task.find({ assignedTo: user._id }).sort({ dueDate: 1 }).limit(10).lean(),
       Attendance.findOne({ userId: user._id, date: todayStr }).lean(),
       Payroll.find({ userId: user._id }).sort({ month: -1 }).limit(6).lean(),
       Notification.countDocuments({ recipientId: user._id, isRead: false }),
       AuditLog.find({ actor: user.name }).sort({ createdAt: -1 }).limit(5).lean(),
-      Attendance.find({ userId: user._id, date: { $regex: `^${currentMonth}` } }).lean(),
+      Attendance.find({
+        userId: user._id,
+        date: { $gte: `${currentMonth}-01`, $lte: `${currentMonth}-31` }
+      }).lean(),
     ]);
 
     // Calculate Overtime & Salary for Employee

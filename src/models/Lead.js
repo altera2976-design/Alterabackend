@@ -129,4 +129,12 @@ LeadSchema.pre('validate', async function (next) {
   next();
 });
 
+LeadSchema.index({ status: 1 });
+LeadSchema.index({ leadSource: 1 });
+LeadSchema.index({ phone: 1 });
+LeadSchema.index({ email: 1 });
+LeadSchema.index({ assignedTo: 1 });
+LeadSchema.index({ createdAt: -1 });
+LeadSchema.index({ status: 1, createdAt: -1 });
+
 module.exports = mongoose.model('Lead', LeadSchema);

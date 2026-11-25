@@ -183,4 +183,12 @@ ProjectSchema.methods.toEmployeeJSON = function () {
   return obj;
 };
 
+ProjectSchema.index({ 'assignedTeam.userId': 1 });
+ProjectSchema.index({ 'projectManager.userId': 1 });
+ProjectSchema.index({ status: 1 });
+ProjectSchema.index({ projectType: 1 });
+ProjectSchema.index({ priority: 1 });
+ProjectSchema.index({ createdAt: -1 });
+ProjectSchema.index({ status: 1, createdAt: -1 });
+
 module.exports = mongoose.model('Project', ProjectSchema);

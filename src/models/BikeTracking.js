@@ -71,6 +71,12 @@ const BikeTrackingSchema = new mongoose.Schema(
   },
 );
 
+BikeTrackingSchema.index({ employeeId: 1, status: 1 });
+BikeTrackingSchema.index({ status: 1, stopTime: -1 });
+BikeTrackingSchema.index({ status: 1, startTime: -1 });
+BikeTrackingSchema.index({ date: 1 });
+BikeTrackingSchema.index({ createdAt: -1 });
+
 module.exports = mongoose.model("BikeTracking", BikeTrackingSchema);
 
 

@@ -72,4 +72,11 @@ const ClientSchema = new mongoose.Schema(
   }
 );
 
+ClientSchema.index({ status: 1 });
+ClientSchema.index({ type: 1 });
+ClientSchema.index({ phone: 1 });
+ClientSchema.index({ email: 1 });
+ClientSchema.index({ name: 1 });
+ClientSchema.index({ createdAt: -1 });
+
 module.exports = mongoose.model('Client', ClientSchema);

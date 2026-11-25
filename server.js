@@ -10,7 +10,11 @@ const PORT = process.env.PORT || 5001;
 const startServer = async () => {
   // Connect database and initialize services (updated schema)
   await connectDB();
-  await googleDriveService.initializeFolderStructure();
+
+  // Initialize Google Drive folder structure in the background (non-blocking for fast cold-start)
+  googleDriveService.initializeFolderStructure().catch((driveErr) => {
+    console.warn("⚠️ [GoogleDriveService] Background folder initialization warning:", driveErr.message);
+  });
 
   // Enforce Super Admin and revoke disabled accounts
   try {
