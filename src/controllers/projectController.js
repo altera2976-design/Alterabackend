@@ -8,6 +8,44 @@ const Attendance = require('../models/Attendance');
 const Quotation = require('../models/Quotation');
 const User = require('../models/User');
 
+// Helper: check if requester has administrative privileges
+const checkIsAdmin = (user) => {
+  if (!user) return false;
+  const role = (user.role || '').toUpperCase();
+  const email = (user.email || '').toLowerCase();
+  const superEmail = (process.env.SUPER_ADMIN_EMAIL || 'alterakitcheninteriorr@gmail.com').toLowerCase();
+  return (
+    role === 'ADMIN' ||
+    role === 'SUPER_ADMIN' ||
+    role === 'SUPERADMIN' ||
+    role.includes('ADMIN') ||
+    email === superEmail ||
+    user.employeeId === 'EMP001' ||
+    user.isAdminPanelEnabled === true
+  );
+};
+
+// Helper: generate unique project ID without collision
+const generateProjectId = async (customId) => {
+  if (customId && typeof customId === 'string' && customId.trim()) {
+    return customId.trim();
+  }
+  const latestProject = await Project.findOne({}, { projectId: 1 }).sort({ createdAt: -1 });
+  let nextNum = 1;
+  if (latestProject && latestProject.projectId) {
+    const match = latestProject.projectId.match(/\d+/);
+    if (match) {
+      nextNum = parseInt(match[0], 10) + 1;
+    }
+  }
+  let candidate = `PR-${String(nextNum).padStart(5, '0')}`;
+  while (await Project.exists({ projectId: candidate })) {
+    nextNum++;
+    candidate = `PR-${String(nextNum).padStart(5, '0')}`;
+  }
+  return candidate;
+};
+
 // Helper: emit socket event if io available
 const emitSocket = (req, event, data) => {
   try {
@@ -47,21 +85,23 @@ const logAudit = async ({ req, action, project, description, oldValue, newValue,
  */
 exports.getProjects = async (req, res, next) => {
   try {
-    const isAdmin = req.user.role === 'ADMIN';
+    const isAdmin = checkIsAdmin(req.user);
     const { search, status, priority, type, employeeId } = req.query;
 
     const filter = {};
 
     if (!isAdmin) {
-      // Employee sees ONLY projects where they are assigned or project manager
+      // Non-admins see projects where they are assigned, project manager, or creator
       filter.$or = [
         { 'assignedTeam.userId': req.user._id },
         { 'projectManager.userId': req.user._id },
+        { createdBy: req.user._id },
       ];
     } else if (employeeId) {
       filter.$or = [
         { 'assignedTeam.userId': employeeId },
         { 'projectManager.userId': employeeId },
+        { createdBy: employeeId },
       ];
     }
 
@@ -93,9 +133,15 @@ exports.getProjects = async (req, res, next) => {
 
     const projects = await Project.find(filter).sort({ createdAt: -1 });
 
-    // Sanitize for employees
+    // Sanitize for employees (unless admin or project creator/manager)
     const formatted = projects.map((p) => {
       if (!isAdmin) {
+        const isOwnerOrPM =
+          (p.createdBy && p.createdBy.toString() === req.user._id.toString()) ||
+          (p.projectManager && p.projectManager.userId?.toString() === req.user._id.toString());
+        if (isOwnerOrPM) {
+          return p;
+        }
         return p.toEmployeeJSON();
       }
       return p;
@@ -123,11 +169,12 @@ exports.getProject = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Project not found' });
     }
 
-    const isAdmin = req.user.role === 'ADMIN';
+    const isAdmin = checkIsAdmin(req.user);
     if (!isAdmin) {
       const isAssigned =
-        project.assignedTeam.some((member) => member.userId.toString() === req.user._id.toString()) ||
-        (project.projectManager && project.projectManager.userId?.toString() === req.user._id.toString());
+        project.assignedTeam?.some((member) => member.userId?.toString() === req.user._id.toString()) ||
+        (project.projectManager && project.projectManager.userId?.toString() === req.user._id.toString()) ||
+        (project.createdBy && project.createdBy.toString() === req.user._id.toString());
 
       if (!isAssigned) {
         return res.status(403).json({
@@ -136,9 +183,13 @@ exports.getProject = async (req, res, next) => {
         });
       }
 
+      const isOwnerOrPM =
+        (project.createdBy && project.createdBy.toString() === req.user._id.toString()) ||
+        (project.projectManager && project.projectManager.userId?.toString() === req.user._id.toString());
+
       return res.status(200).json({
         success: true,
-        data: project.toEmployeeJSON(),
+        data: isOwnerOrPM ? project : project.toEmployeeJSON(),
       });
     }
 
@@ -157,13 +208,39 @@ exports.getProject = async (req, res, next) => {
  */
 exports.createProject = async (req, res, next) => {
   try {
-    const count = await Project.countDocuments();
-    const projectId = req.body.projectId || `PR-${String(count + 1).padStart(5, '0')}`;
+    const projectId = await generateProjectId(req.body.projectId);
+
+    // Default projectManager to creator if not provided
+    let projectManager = req.body.projectManager;
+    if (!projectManager || !projectManager.userId) {
+      projectManager = {
+        userId: req.user._id,
+        name: req.user.name || 'Admin',
+        email: req.user.email || '',
+        phone: req.user.phone || '',
+      };
+    }
+
+    // Ensure creator is present in assignedTeam
+    let assignedTeam = Array.isArray(req.body.assignedTeam) ? [...req.body.assignedTeam] : [];
+    const hasCreator = assignedTeam.some((m) => m.userId && m.userId.toString() === req.user._id.toString());
+    if (!hasCreator) {
+      assignedTeam.push({
+        userId: req.user._id,
+        name: req.user.name || 'Admin',
+        email: req.user.email || '',
+        phone: req.user.phone || '',
+        role: 'Project Manager',
+        assignedAt: new Date(),
+      });
+    }
 
     const projectData = {
       ...req.body,
       projectId,
       projectType: Project.normalizeProjectType ? Project.normalizeProjectType(req.body.projectType) : (req.body.projectType || 'Interior'),
+      projectManager,
+      assignedTeam,
       createdBy: req.user._id,
     };
 
@@ -178,22 +255,24 @@ exports.createProject = async (req, res, next) => {
       req,
       action: 'PROJECT_CREATED',
       project,
-      description: `Project "${project.name}" created by Admin`,
+      description: `Project "${project.name}" created by ${req.user.name || 'Admin'}`,
       newValue: project.toObject(),
     });
 
     // Notify assigned team members
     if (project.assignedTeam && project.assignedTeam.length > 0) {
       for (const member of project.assignedTeam) {
-        await Notification.create({
-          recipientId: member.userId,
-          senderId: req.user._id,
-          senderName: req.user.name,
-          title: 'Assigned to New Project',
-          message: `You have been assigned as ${member.role} on project "${project.name}"`,
-          type: 'PROJECT',
-          linkId: project._id.toString(),
-        });
+        if (member.userId && member.userId.toString() !== req.user._id.toString()) {
+          await Notification.create({
+            recipientId: member.userId,
+            senderId: req.user._id,
+            senderName: req.user.name,
+            title: 'Assigned to New Project',
+            message: `You have been assigned as ${member.role} on project "${project.name}"`,
+            type: 'PROJECT',
+            linkId: project._id.toString(),
+          });
+        }
       }
     }
 
@@ -219,13 +298,14 @@ exports.updateProject = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Project not found' });
     }
 
-    const isAdmin = req.user.role === 'ADMIN';
+    const isAdmin = checkIsAdmin(req.user);
     const isPM = project.projectManager?.userId?.toString() === req.user._id.toString();
+    const isOwner = project.createdBy?.toString() === req.user._id.toString();
 
-    if (!isAdmin && !isPM) {
+    if (!isAdmin && !isPM && !isOwner) {
       return res.status(403).json({
         success: false,
-        message: 'Access denied. Only Admins or Project Managers can update project details.',
+        message: 'Access denied. Only Admins, Project Managers, or Project Owners can update project details.',
       });
     }
 
@@ -270,7 +350,7 @@ exports.updateProject = async (req, res, next) => {
 
     res.status(200).json({
       success: true,
-      data: isAdmin ? project : project.toEmployeeJSON(),
+      data: (isAdmin || isPM || isOwner) ? project : project.toEmployeeJSON(),
     });
   } catch (error) {
     next(error);
@@ -461,7 +541,7 @@ exports.deleteProjectFile = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'File not found' });
     }
 
-    const isAdmin = req.user.role === 'ADMIN';
+    const isAdmin = checkIsAdmin(req.user);
     const isOwner = file.uploadedBy?.toString() === req.user._id.toString();
 
     if (!isAdmin && !isOwner) {
@@ -612,8 +692,23 @@ exports.convertQuotationToProject = async (req, res, next) => {
       });
     }
 
-    const count = await Project.countDocuments();
-    const projectId = `PR-${String(count + 1).padStart(5, '0')}`;
+    const projectId = await generateProjectId();
+
+    const projectManager = {
+      userId: req.user._id,
+      name: req.user.name || 'Admin',
+      email: req.user.email || '',
+      phone: req.user.phone || '',
+    };
+
+    const assignedTeam = [{
+      userId: req.user._id,
+      name: req.user.name || 'Admin',
+      email: req.user.email || '',
+      phone: req.user.phone || '',
+      role: 'Project Manager',
+      assignedAt: new Date(),
+    }];
 
     const project = await Project.create({
       projectId,
@@ -625,6 +720,8 @@ exports.convertQuotationToProject = async (req, res, next) => {
       },
       projectAddress: quotation.siteLocation || quotation.client.address || '',
       projectType: Project.normalizeProjectType ? Project.normalizeProjectType(quotation.projectType) : (quotation.projectType || 'Interior'),
+      projectManager,
+      assignedTeam,
       quotationId: quotation._id,
       quotationNumber: quotation.quotationNumber,
       value: quotation.grandTotal || 0,
