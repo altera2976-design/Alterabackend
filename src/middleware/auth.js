@@ -6,16 +6,14 @@ const getSuperAdminEmail = () => {
     process.env.SUPER_ADMIN_EMAIL ||
     process.env.ADMIN_EMAIL ||
     "alterakitcheninteriorr@gmail.com"
-  ).toLowerCase().trim();
+  )
+    .toLowerCase()
+    .trim();
 };
 
 const getDisabledAdminEmails = () => {
   const currentSuper = getSuperAdminEmail();
-  const list = [
-    "admin@company.com",
-    "admin@alterainterior.com",
-    "alterakitcheninterior@gmail.com",
-  ];
+  const list = ["alterakitcheninterior@gmail.com"];
   return list.filter((e) => e !== currentSuper);
 };
 
@@ -41,7 +39,9 @@ const protect = async (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await User.findById(decoded.id).select("+passwordChangedAt -documents");
+    const user = await User.findById(decoded.id).select(
+      "+passwordChangedAt -documents",
+    );
 
     if (!user) {
       return res.status(401).json({
@@ -58,20 +58,29 @@ const protect = async (req, res, next) => {
       });
     }
 
-    if (user.status === "INACTIVE" || user.status === "SUSPENDED" || user.accessStatus === "SUSPENDED") {
+    if (
+      user.status === "INACTIVE" ||
+      user.status === "SUSPENDED" ||
+      user.accessStatus === "SUSPENDED"
+    ) {
       return res.status(403).json({
         success: false,
-        message: "Your account has not been authorized by Super Admin. Please contact Super Admin.",
+        message:
+          "Your account has not been authorized by Super Admin. Please contact Super Admin.",
       });
     }
 
     // Invalidate previous sessions if password was changed after token issuance
     if (user.passwordChangedAt && decoded.iat) {
-      const changedTimestamp = parseInt(user.passwordChangedAt.getTime() / 1000, 10);
+      const changedTimestamp = parseInt(
+        user.passwordChangedAt.getTime() / 1000,
+        10,
+      );
       if (decoded.iat < changedTimestamp) {
         return res.status(401).json({
           success: false,
-          message: "Password was recently changed. Your session has expired. Please log in again.",
+          message:
+            "Password was recently changed. Your session has expired. Please log in again.",
         });
       }
     }
@@ -83,13 +92,16 @@ const protect = async (req, res, next) => {
     req.user = user;
     next();
   } catch (error) {
-    if (error.name === 'TokenExpiredError' || error.name === 'JsonWebTokenError') {
+    if (
+      error.name === "TokenExpiredError" ||
+      error.name === "JsonWebTokenError"
+    ) {
       return res.status(401).json({
         success: false,
         message: "Invalid or expired token.",
       });
     }
-    
+
     console.error("Auth Middleware Error:", error);
     return res.status(500).json({
       success: false,
@@ -161,7 +173,8 @@ const checkPermission = (moduleName, action = "view") => {
     if (userRole === "ADMIN" && req.user?.isAdminPanelEnabled !== true) {
       return res.status(403).json({
         success: false,
-        message: "Your account has not been authorized by Super Admin. Please contact Super Admin.",
+        message:
+          "Your account has not been authorized by Super Admin. Please contact Super Admin.",
       });
     }
 
@@ -183,7 +196,18 @@ const checkPermission = (moduleName, action = "view") => {
       project: ["project", "projects"],
       transactions: ["transactions", "transaction"],
       transaction: ["transaction", "transactions"],
-      crm: ["crm", "crm_leads", "crm_customers", "crm_clients", "crm_followups", "crm_pipeline", "crm_consultations", "crm_campaigns", "crm_team", "crm_settings"],
+      crm: [
+        "crm",
+        "crm_leads",
+        "crm_customers",
+        "crm_clients",
+        "crm_followups",
+        "crm_pipeline",
+        "crm_consultations",
+        "crm_campaigns",
+        "crm_team",
+        "crm_settings",
+      ],
       crm_leads: ["crm_leads", "crm"],
       crm_customers: ["crm_customers", "crm_clients", "clients", "crm"],
       crm_clients: ["crm_clients", "crm_customers", "clients", "crm"],
@@ -235,9 +259,14 @@ const checkPermission = (moduleName, action = "view") => {
     }
 
     const effectiveAction =
-      action.startsWith("view") || action === "viewSummary" || action === "viewDetails"
+      action.startsWith("view") ||
+      action === "viewSummary" ||
+      action === "viewDetails" ||
+      action === "download"
         ? "view"
-        : action === "refund"
+        : action === "refund" ||
+          action === "assign" ||
+          action === "upload"
         ? "edit"
         : action;
 
@@ -275,15 +304,19 @@ const checkPermission = (moduleName, action = "view") => {
       }
     }
 
-    // For Admin roles, if modPerms was explicitly undefined, DO NOT allow default. They must be granted explicitly.
-
-    // Default: allow viewing resources for active authenticated users (except ADMIN who must be explicitly granted)
-    if (
-      action === "view" &&
-      userRole !== "ADMIN" &&
-      !userRole.includes("ADMIN")
-    ) {
-      return next();
+    // Default: allow viewing resources for active authenticated users
+    // For active Admins with panel access, allow view if not explicitly revoked by Super Admin
+    if (effectiveAction === "view") {
+      if (userRole === "ADMIN" || userRole.includes("ADMIN")) {
+        if (
+          req.user?.isAdminPanelEnabled === true &&
+          req.user?.status !== "INACTIVE"
+        ) {
+          return next();
+        }
+      } else {
+        return next();
+      }
     }
 
     const managementRoles = [

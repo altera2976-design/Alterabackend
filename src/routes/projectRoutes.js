@@ -7,7 +7,7 @@ router.use(protect); // All project routes require auth
 
 // Projects list & create
 router.route('/')
-  .get(checkPermission('projects', 'view'), projectController.getProjects)
+  .get(projectController.getProjects)
   .post(checkPermission('projects', 'create'), projectController.createProject);
 
 // Convert Quotation to Project
